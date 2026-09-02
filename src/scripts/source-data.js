@@ -2,7 +2,22 @@ import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 
 const isoDate = z.string().refine((value) => !Number.isNaN(Date.parse(value)), 'must be a valid date');
-const finite = z.number().finite();
+const nonNegative = z.number().min(0);
+
+const toSlug = (value) =>
+  value
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+const slug = z.string().trim().min(1).max(100).transform(toSlug).pipe(z.string().min(1).max(100));
+const nonBlankStrings = (max) =>
+  z
+    .array(z.string().trim().max(max))
+    .default([])
+    .transform((values) => values.filter((value) => value.length > 0));
 
 const reviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
@@ -16,20 +31,26 @@ const productSchema = z.object({
   id: z.number().int().positive(),
   title: z.string().trim().min(1).max(255),
   description: z.string().default(''),
-  category: z.string().trim().toLowerCase().min(1).max(100),
-  price: finite.min(0),
-  discountPercentage: finite.min(0).max(100),
-  rating: finite.min(0).max(5),
+  category: slug,
+  price: nonNegative,
+  discountPercentage: nonNegative.max(100),
+  rating: nonNegative.max(5),
   stock: z.number().int().min(0),
-  tags: z.array(z.string().trim().min(1).max(100)).default([]),
-  brand: z.string().trim().min(1).max(100).nullable().default(null),
+  tags: nonBlankStrings(100),
+  brand: z
+    .string()
+    .trim()
+    .max(100)
+    .nullable()
+    .default(null)
+    .transform((value) => value || null),
   sku: z.string().trim().min(1).max(64),
-  weight: finite.min(0).nullable().default(null),
+  weight: nonNegative.nullable().default(null),
   dimensions: z
     .object({
-      width: finite.min(0).nullable().default(null),
-      height: finite.min(0).nullable().default(null),
-      depth: finite.min(0).nullable().default(null),
+      width: nonNegative.nullable().default(null),
+      height: nonNegative.nullable().default(null),
+      depth: nonNegative.nullable().default(null),
     })
     .default({ width: null, height: null, depth: null }),
   warrantyInformation: z.string().trim().min(1).max(255),
@@ -46,12 +67,12 @@ const productSchema = z.object({
       qrCode: z.string().max(1024).nullable().default(null),
     })
     .default({ createdAt: null, updatedAt: null, barcode: null, qrCode: null }),
-  images: z.array(z.string().max(1024)).default([]),
+  images: nonBlankStrings(1024),
   thumbnail: z.string().trim().min(1).max(1024),
 });
 
 const categorySchema = z.object({
-  slug: z.string().trim().toLowerCase().min(1).max(100),
+  slug,
   name: z.string().trim().min(1).max(100),
 });
 
@@ -60,7 +81,7 @@ export const categoriesPayloadSchema = z.array(categorySchema);
 
 const snapshotDir = new URL('../../data/', import.meta.url);
 
-async function fetchJson(url, { attempts = 3, timeoutMs = 15_000 } = {}) {
+async function fetchJson(url, { attempts = 2, timeoutMs = 10_000 } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {

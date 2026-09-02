@@ -32,16 +32,16 @@ export function createCatalogWriter(connection) {
       return new Map(rows.map((r) => [r.slug, r.id]));
     },
 
-    /** @returns {Map<string, number>} lower-cased tag name -> id */
+    /** @returns {{ id: number, name: string }[]} the stored rows for the given names */
     async upsertTags(names) {
-      if (names.length === 0) return new Map();
+      if (names.length === 0) return [];
       await insertRows(
         `INSERT INTO tags (name) VALUES ? AS new
          ON DUPLICATE KEY UPDATE name = new.name`,
         names.map((name) => [name]),
       );
       const [rows] = await connection.query(`SELECT id, name FROM tags WHERE name IN (?)`, [names]);
-      return new Map(rows.map((r) => [r.name.toLowerCase(), r.id]));
+      return rows;
     },
 
     async upsertProducts(products) {

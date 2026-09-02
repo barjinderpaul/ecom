@@ -32,15 +32,11 @@ function titleCase(slug) {
     .join(' ');
 }
 
-function uniqueTags(tags) {
-  const seen = new Set();
-  return tags.filter((tag) => {
-    const key = tag.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
+/**
+ * Approximates the utf8mb4_0900_ai_ci collation of the unique keys (case- and
+ * accent-insensitive) so in-memory de-duplication agrees with MySQL.
+ */
+const collationKey = (value) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 
 function uniqueBy(items, keyOf) {
   const seen = new Set();
@@ -55,15 +51,24 @@ function uniqueBy(items, keyOf) {
 function assertUniqueSkus(products) {
   const bySku = new Map();
   for (const product of products) {
-    const existing = bySku.get(product.sku);
+    const key = collationKey(product.sku);
+    const existing = bySku.get(key);
     if (existing !== undefined) {
       throw new Error(`Products ${existing} and ${product.id} share SKU "${product.sku}"`);
     }
-    bySku.set(product.sku, product.id);
+    bySku.set(key, product.id);
   }
 }
 
+function lookup(map, key, what) {
+  const value = map.get(key);
+  if (value === undefined) throw new Error(`Unknown ${what} "${key}"`);
+  return value;
+}
+
 async function writeCatalog(pool, { products, categories }) {
+  if (products.length === 0)
+    throw new Error('Source data contains no products; refusing to empty the catalogue');
   const productIds = uniqueBy(products, (p) => p.id).map((p) => p.id);
   if (productIds.length !== products.length) throw new Error('Duplicate product ids in source data');
   assertUniqueSkus(products);
@@ -76,8 +81,8 @@ async function writeCatalog(pool, { products, categories }) {
   }
   const allCategories = [...categoryBySlug.values()];
 
-  const productTags = new Map(products.map((p) => [p.id, uniqueTags(p.tags)]));
-  const allTags = uniqueTags([...productTags.values()].flat());
+  const productTags = new Map(products.map((p) => [p.id, uniqueBy(p.tags, collationKey)]));
+  const allTags = uniqueBy([...productTags.values()].flat(), collationKey);
 
   const connection = await pool.getConnection();
   try {
@@ -85,12 +90,12 @@ async function writeCatalog(pool, { products, categories }) {
     const writer = createCatalogWriter(connection);
 
     const categoryIds = await writer.upsertCategories(allCategories);
-    const tagIds = await writer.upsertTags(allTags);
+    const tagIds = new Map((await writer.upsertTags(allTags)).map((row) => [collationKey(row.name), row.id]));
 
     await writer.upsertProducts(
       products.map((p) => ({
         id: p.id,
-        categoryId: categoryIds.get(p.category),
+        categoryId: lookup(categoryIds, p.category, 'category'),
         title: p.title,
         description: p.description,
         brand: p.brand,
@@ -123,9 +128,11 @@ async function writeCatalog(pool, { products, categories }) {
     await writer.replaceProductTags(
       productIds,
       products.flatMap((p) =>
-        productTags
-          .get(p.id)
-          .map((tag, position) => ({ productId: p.id, tagId: tagIds.get(tag.toLowerCase()), position })),
+        productTags.get(p.id).map((tag, position) => ({
+          productId: p.id,
+          tagId: lookup(tagIds, collationKey(tag), 'tag'),
+          position,
+        })),
       ),
     );
     await writer.replaceProductReviews(

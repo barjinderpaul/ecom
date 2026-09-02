@@ -12,10 +12,10 @@ const MYSQL_UNAVAILABLE_CODES = new Set([
   'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR',
   'PROTOCOL_ENQUEUE_AFTER_QUIT',
   'ER_ACCESS_DENIED_ERROR',
-  'ER_BAD_DB_ERROR',
-  'ER_NO_SUCH_TABLE',
   'ER_CON_COUNT_ERROR',
 ]);
+
+const MYSQL_NOT_SEEDED_CODES = new Set(['ER_BAD_DB_ERROR', 'ER_NO_SUCH_TABLE']);
 
 /**
  * Maps infrastructure failures (database or search cluster unreachable, index
@@ -40,8 +40,13 @@ export function toDependencyError(err) {
     }
     return null;
   }
-  if (typeof err?.code === 'string' && MYSQL_UNAVAILABLE_CODES.has(err.code)) {
-    return new ServiceUnavailableError('Database is unavailable');
+  if (typeof err?.code === 'string') {
+    if (MYSQL_NOT_SEEDED_CODES.has(err.code)) {
+      return new ServiceUnavailableError('Database has not been seeded yet');
+    }
+    if (MYSQL_UNAVAILABLE_CODES.has(err.code)) {
+      return new ServiceUnavailableError('Database is unavailable');
+    }
   }
   return null;
 }

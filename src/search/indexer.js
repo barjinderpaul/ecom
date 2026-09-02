@@ -10,14 +10,29 @@ export async function rebuildProductsIndex({ client, alias, documents, batchSize
   const index = `${alias}-${Date.now()}`;
   await client.indices.create({ index, settings: productsIndexSettings, mappings: productsIndexMappings });
 
+  let swapped = false;
   try {
     const count = await bulkLoad({ client, index, documents, batchSize });
     await client.indices.refresh({ index });
     const replaced = await swapAlias({ client, alias, index, logger });
+    swapped = true;
+    await deletePrevious({ client, indices: replaced, logger });
     return { index, count, replaced };
   } catch (err) {
-    await client.indices.delete({ index }, { ignore: [404] });
+    if (!swapped) await client.indices.delete({ index }, { ignore: [404] });
     throw err;
+  }
+}
+
+async function deletePrevious({ client, indices, logger }) {
+  if (indices.length === 0) return;
+  try {
+    await client.indices.delete({ index: indices }, { ignore: [404] });
+  } catch (err) {
+    logger?.warn(
+      { err, indices },
+      'Previous index could not be deleted; the alias already points at the new one',
+    );
   }
 }
 
@@ -64,9 +79,5 @@ async function swapAlias({ client, alias, index, logger }) {
 
   actions.push({ add: { index, alias } });
   await client.indices.updateAliases({ actions });
-
-  if (previous.length > 0) {
-    await client.indices.delete({ index: previous }, { ignore: [404] });
-  }
   return previous;
 }

@@ -24,9 +24,25 @@ describe('productsPayloadSchema', () => {
     assert.equal(result.data.products[0].brand, null);
   });
 
-  it('normalises the category slug to lower case', () => {
-    const result = productsPayloadSchema.safeParse({ products: [{ ...sample, category: ' Beauty ' }] });
-    assert.equal(result.data.products[0].category, 'beauty');
+  it('normalises the category into a slug', () => {
+    for (const [input, expected] of [
+      [' Beauty ', 'beauty'],
+      ['Home Décor & More', 'home-decor-more'],
+      ['mens-shoes', 'mens-shoes'],
+    ]) {
+      const result = productsPayloadSchema.safeParse({ products: [{ ...sample, category: input }] });
+      assert.equal(result.data.products[0].category, expected);
+    }
+  });
+
+  it('drops blank tags and images and turns an empty brand into null', () => {
+    const result = productsPayloadSchema.safeParse({
+      products: [{ ...sample, tags: [' ', 'new', ''], images: ['', 'https://x/1.webp'], brand: '  ' }],
+    });
+    assert.equal(result.success, true);
+    assert.deepEqual(result.data.products[0].tags, ['new']);
+    assert.deepEqual(result.data.products[0].images, ['https://x/1.webp']);
+    assert.equal(result.data.products[0].brand, null);
   });
 
   it('defaults optional collections to empty', () => {
@@ -49,6 +65,7 @@ describe('productsPayloadSchema', () => {
     ['review rating of 0', { reviews: [{ ...sample.reviews[0], rating: 0 }] }],
     ['invalid review date', { reviews: [{ ...sample.reviews[0], date: 'yesterday' }] }],
     ['missing thumbnail', { thumbnail: undefined }],
+    ['category with no slug characters', { category: '!!!' }],
   ]) {
     it(`rejects ${name}`, () => {
       assert.equal(productsPayloadSchema.safeParse({ products: [{ ...sample, ...patch }] }).success, false);

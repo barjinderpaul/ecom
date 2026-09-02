@@ -48,9 +48,9 @@ CREATE TABLE IF NOT EXISTS products (
 
 CREATE TABLE IF NOT EXISTS product_images (
   id         INT UNSIGNED     NOT NULL AUTO_INCREMENT,
-  product_id INT UNSIGNED     NOT NULL,
-  position   TINYINT UNSIGNED NOT NULL,
-  url        VARCHAR(1024)    NOT NULL,
+  product_id INT UNSIGNED      NOT NULL,
+  position   SMALLINT UNSIGNED NOT NULL,
+  url        VARCHAR(1024)     NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_product_images_position (product_id, position),
   CONSTRAINT fk_product_images_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
@@ -64,9 +64,9 @@ CREATE TABLE IF NOT EXISTS tags (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS product_tags (
-  product_id INT UNSIGNED     NOT NULL,
-  tag_id     INT UNSIGNED     NOT NULL,
-  position   TINYINT UNSIGNED NOT NULL,
+  product_id INT UNSIGNED      NOT NULL,
+  tag_id     INT UNSIGNED      NOT NULL,
+  position   SMALLINT UNSIGNED NOT NULL,
   PRIMARY KEY (product_id, tag_id),
   UNIQUE KEY uq_product_tags_position (product_id, position),
   KEY idx_product_tags_tag (tag_id),
@@ -76,13 +76,13 @@ CREATE TABLE IF NOT EXISTS product_tags (
 
 CREATE TABLE IF NOT EXISTS product_reviews (
   id             INT UNSIGNED     NOT NULL AUTO_INCREMENT,
-  product_id     INT UNSIGNED     NOT NULL,
-  position       TINYINT UNSIGNED NOT NULL,
-  rating         TINYINT UNSIGNED NOT NULL,
-  comment        VARCHAR(1000)    NOT NULL,
-  reviewer_name  VARCHAR(255)     NOT NULL,
-  reviewer_email VARCHAR(255)     NOT NULL,
-  reviewed_at    DATETIME(3)      NOT NULL,
+  product_id     INT UNSIGNED      NOT NULL,
+  position       SMALLINT UNSIGNED NOT NULL,
+  rating         TINYINT UNSIGNED  NOT NULL,
+  comment        VARCHAR(1000)     NOT NULL,
+  reviewer_name  VARCHAR(255)      NOT NULL,
+  reviewer_email VARCHAR(255)      NOT NULL,
+  reviewed_at    DATETIME(3)       NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_product_reviews_position (product_id, position),
   CONSTRAINT fk_product_reviews_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE,

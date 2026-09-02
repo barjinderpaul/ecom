@@ -2,11 +2,12 @@ import { z } from 'zod';
 
 const MAX_UNSIGNED_INT = 4_294_967_295;
 
-const blankToUndefined = (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value);
+const isBlank = (value) => value === undefined || (typeof value === 'string' && value.trim() === '');
+const blankToUndefined = (value) => (isBlank(value) ? undefined : value);
 
 function integerParam({ min, max, fallback }) {
   return z.preprocess(
-    (value) => (value === undefined || value === '' ? String(fallback) : value),
+    (value) => (isBlank(value) ? String(fallback) : value),
     z
       .string({ error: 'must be a single value' })
       .trim()
@@ -45,5 +46,5 @@ export const productIdParamsSchema = z.object({
     .string()
     .regex(/^[1-9][0-9]{0,9}$/, 'must be a positive integer')
     .transform(Number)
-    .pipe(z.number().int().max(MAX_UNSIGNED_INT, 'must be a positive integer')),
+    .pipe(z.number().int().max(MAX_UNSIGNED_INT, `must be at most ${MAX_UNSIGNED_INT}`)),
 });

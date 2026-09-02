@@ -6,7 +6,11 @@ const parse = (schema, input) => schema.safeParse(input);
 
 describe('listProductsQuerySchema', () => {
   it('applies defaults when parameters are absent or blank', () => {
-    for (const input of [{}, { page: '', limit: '', category: '', query: '  ' }]) {
+    for (const input of [
+      {},
+      { page: '', limit: '', category: '', query: '  ' },
+      { page: '  ', limit: ' ' },
+    ]) {
       const { success, data } = parse(listProductsQuerySchema, input);
       assert.equal(success, true);
       assert.equal(data.page, 1);
