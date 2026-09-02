@@ -1,0 +1,29 @@
+{
+  "name": "ecommerce-api",
+  "version": "1.0.0",
+  "description": "Simple e-commerce REST API: Node.js + Express 5 + MySQL 8 + Elasticsearch 8, seeded from dummyjson.com/products",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node src/scripts/seed.js",
+    "test": "node --test test/",
+    "smoke": "node scripts/smoke.js",
+    "lint": "node --check src/server.js && node --check src/scripts/seed.js"
+  },
+  "dependencies": {
+    "@elastic/elasticsearch": "^8.19.2",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "mysql2": "^3.24.3",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "zod": "^4.5.4"
+  },
+  "license": "MIT"
+}
