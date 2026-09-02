@@ -1,4 +1,5 @@
 import { HttpError } from '../lib/errors.js';
+import { toDependencyError } from '../lib/dependency-errors.js';
 
 export function notFoundHandler(req, res) {
   res.status(404).json({
@@ -6,23 +7,30 @@ export function notFoundHandler(req, res) {
   });
 }
 
-// Express recognises an error handler by its arity: it MUST have four params.
-// eslint-disable-next-line no-unused-vars
+function serialize(error) {
+  const body = { code: error.code, message: error.message };
+  if (error.details !== undefined) body.details = error.details;
+  return { error: body };
+}
+
 export function errorHandler(err, req, res, next) {
   if (res.headersSent) return next(err);
 
   if (err instanceof HttpError) {
-    const body = { code: err.code, message: err.message };
-    if (err.details !== undefined) body.details = err.details;
-    return res.status(err.status).json({ error: body });
+    return res.status(err.status).json(serialize(err));
   }
 
-  // Errors raised by Express itself / body parsers carry a 4xx status.
-  const status = Number(err.status ?? err.statusCode);
+  const dependencyError = toDependencyError(err);
+  if (dependencyError) {
+    req.log?.warn({ err }, dependencyError.message);
+    return res.status(dependencyError.status).json(serialize(dependencyError));
+  }
+
+  const status = Number(err?.status ?? err?.statusCode);
   if (Number.isInteger(status) && status >= 400 && status < 500) {
     return res.status(status).json({ error: { code: 'BAD_REQUEST', message: err.message } });
   }
 
-  (req.log ?? console).error({ err }, 'Unhandled error');
+  req.log?.error({ err }, 'Unhandled error');
   return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
 }

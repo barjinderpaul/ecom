@@ -3,6 +3,6 @@ import { config } from '../config.js';
 
 export const logger = pino({
   level: config.LOG_LEVEL,
-  base: undefined, // drop pid/hostname noise
+  base: undefined,
   redact: ['req.headers.authorization', 'req.headers.cookie'],
 });

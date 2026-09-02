@@ -1,10 +1,5 @@
 import { z } from 'zod';
 
-/**
- * All runtime configuration comes from environment variables and is validated
- * once at startup, so a misconfigured deployment fails immediately with a
- * readable message instead of at the first request.
- */
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -23,14 +18,14 @@ const schema = z.object({
   SEED_FALLBACK_TO_SNAPSHOT: z
     .enum(['true', 'false'])
     .default('true')
-    .transform((v) => v === 'true'),
+    .transform((value) => value === 'true'),
 });
 
 export function loadConfig(env = process.env) {
   const result = schema.safeParse(env);
   if (!result.success) {
-    const problems = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
-    throw new Error(`Invalid configuration: ${problems}`);
+    const problems = result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`);
+    throw new Error(`Invalid configuration: ${problems.join('; ')}`);
   }
   return result.data;
 }

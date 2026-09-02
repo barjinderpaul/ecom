@@ -1,9 +1,9 @@
 import { ValidationError } from '../lib/errors.js';
 
 /**
- * Validates req[source] against a zod schema. The parsed (coerced, defaulted)
- * value is exposed on res.locals[source] — Express 5 makes req.query a getter,
- * so we never try to overwrite it.
+ * Validates req[source] with a zod schema and exposes the parsed value on
+ * res.locals[source]. Express 5 defines req.query as a getter, so the parsed
+ * value is never written back onto the request.
  */
 export function validate(schema, source = 'query') {
   return (req, res, next) => {

@@ -1,8 +1,3 @@
-/**
- * Errors thrown from any layer and translated into HTTP responses by the
- * error-handler middleware. Anything that is not an HttpError is a bug and is
- * reported as an opaque 500.
- */
 export class HttpError extends Error {
   constructor(status, code, message, details) {
     super(message);
@@ -28,8 +23,8 @@ export class NotFoundError extends HttpError {
 }
 
 export class ServiceUnavailableError extends HttpError {
-  constructor(message = 'Service unavailable', details) {
-    super(503, 'SERVICE_UNAVAILABLE', message, details);
+  constructor(message = 'Service unavailable') {
+    super(503, 'SERVICE_UNAVAILABLE', message);
     this.name = 'ServiceUnavailableError';
   }
 }

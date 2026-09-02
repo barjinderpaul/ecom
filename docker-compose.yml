@@ -1,0 +1,117 @@
+name: ecommerce-api
+
+x-app-environment: &app-environment
+  NODE_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  MYSQL_HOST: mysql
+  MYSQL_PORT: 3306
+  MYSQL_USER: ${MYSQL_USER:-app}
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD:-app}
+  MYSQL_DATABASE: ${MYSQL_DATABASE:-ecommerce}
+  ELASTICSEARCH_URL: http://elasticsearch:9200
+  ELASTICSEARCH_INDEX: ${ELASTICSEARCH_INDEX:-products}
+  DATA_SOURCE_URL: ${DATA_SOURCE_URL:-https://dummyjson.com}
+  SEED_FALLBACK_TO_SNAPSHOT: ${SEED_FALLBACK_TO_SNAPSHOT:-true}
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ecommerce}
+      MYSQL_USER: ${MYSQL_USER:-app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-app}
+    ports:
+      - '${MYSQL_PORT:-3306}:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    # performance_schema alone costs ~100 MB and is not needed for a dev catalogue.
+    command: ['mysqld', '--performance-schema=OFF', '--innodb-buffer-pool-size=64M']
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      # -h 127.0.0.1 forces TCP so the temporary socket-only server used during
+      # first-run initialisation does not report healthy prematurely.
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '--silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.12
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+      xpack.ml.enabled: 'false'
+      # Laptops with little free disk otherwise get read-only indices.
+      cluster.routing.allocation.disk.threshold_enabled: 'false'
+    ports:
+      - '${ELASTICSEARCH_PORT:-9200}:9200'
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "curl -fsS 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' || exit 1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+
+  seed:
+    build: .
+    image: ecommerce-api:local
+    command: ['node', 'src/scripts/seed.js']
+    environment: *app-environment
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build: .
+    image: ecommerce-api:local
+    init: true
+    environment:
+      <<: *app-environment
+      PORT: 3000
+    ports:
+      - '${API_PORT:-3000}:3000'
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  es_data:
