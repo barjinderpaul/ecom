@@ -15,7 +15,11 @@ docker compose up --build
 Startup order is enforced with health checks: MySQL and Elasticsearch come up first, the `seed` container fetches
 the data, writes MySQL, builds the search index and exits, and only then does the `api` container start on
 <http://localhost:3000>. The first run downloads about 3 GB of images and takes a few minutes; later runs
-take under a minute. The stack is capped at about 2 GB of RAM (Elasticsearch 1 GB, MySQL 512 MB, API 256 MB).
+take under a minute. Every container has a memory limit (Elasticsearch 1.25 GB, MySQL 512 MB, seed and API
+256 MB each), so the whole stack stays under about 2.3 GB. MySQL and Elasticsearch are also published, on
+`127.0.0.1:3307` and `127.0.0.1:9201`, so they never collide with instances you may already run locally.
+
+On a Linux host without Docker Desktop, Elasticsearch may need `sudo sysctl -w vm.max_map_count=262144` once.
 
 ```sh
 curl 'http://localhost:3000/health'
@@ -40,12 +44,13 @@ Ports and credentials can be overridden by copying `.env.example` to `.env`; eve
 
 ### Without Docker
 
-You need MySQL 8 and Elasticsearch 8 reachable from your machine, then:
+You need MySQL 8 and Elasticsearch 8 reachable from your machine (the compose services work: start them with
+`docker compose up mysql elasticsearch` and use the ports below), then:
 
 ```sh
 npm ci
-npm run seed    # creates the tables, loads the data, builds the index
-npm start       # or: npm run dev (restarts on file changes)
+MYSQL_PORT=3307 ELASTICSEARCH_URL=http://localhost:9201 npm run seed   # tables, data, index
+MYSQL_PORT=3307 ELASTICSEARCH_URL=http://localhost:9201 npm start      # or: npm run dev
 ```
 
 Configuration is read from environment variables, validated at startup (`src/config.js`):
@@ -220,7 +225,8 @@ category becomes a filter inside the search.
 - The API never exposes internal errors. Infrastructure failures are mapped to `503` so clients can tell
   "retry later" from "bad request".
 - The Docker image runs as the unprivileged `node` user, installs production dependencies only, and every
-  container has a memory limit so the stack behaves on a laptop.
+  container has a memory limit so the stack behaves on a laptop. Database and search ports are bound to
+  loopback because Elasticsearch runs with security disabled.
 - `docker compose up` a second time re-runs the seed (a few seconds); data volumes persist across restarts.
 
 ## Known limitations
@@ -231,7 +237,8 @@ category becomes a filter inside the search.
 - Schema changes are not migrated: `schema.sql` uses `CREATE TABLE IF NOT EXISTS`, so after editing it run
   `docker compose down -v` before starting again.
 - If upstream ever moves a SKU from one product id to another between two seeds, the products upsert fails on
-  the unique key; the transaction rolls back and the seed exits non-zero.
+  the unique key; the transaction rolls back and the seed exits non-zero. An upstream payload with zero
+  products is also rejected rather than emptying the catalogue.
 - Reviewers are stored per review (name and e-mail) because the upstream data has no reviewer ids to build a
   users table from.
 - Elasticsearch runs as a single node with security disabled, which is appropriate for local development only.

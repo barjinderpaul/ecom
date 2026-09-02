@@ -22,11 +22,11 @@ services:
       MYSQL_USER: ${MYSQL_USER:-app}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-app}
     ports:
-      - '${MYSQL_PORT:-3306}:3306'
+      - '127.0.0.1:${MYSQL_PORT:-3307}:3306'
     volumes:
       - mysql_data:/var/lib/mysql
     # performance_schema alone costs ~100 MB and is not needed for a dev catalogue.
-    command: ['mysqld', '--performance-schema=OFF', '--innodb-buffer-pool-size=64M']
+    command: ['mysqld', '--performance-schema=OFF']
     deploy:
       resources:
         limits:
@@ -50,13 +50,13 @@ services:
       # Laptops with little free disk otherwise get read-only indices.
       cluster.routing.allocation.disk.threshold_enabled: 'false'
     ports:
-      - '${ELASTICSEARCH_PORT:-9200}:9200'
+      - '127.0.0.1:${ELASTICSEARCH_PORT:-9201}:9200'
     volumes:
       - es_data:/usr/share/elasticsearch/data
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 1280M
     healthcheck:
       test:
         [
