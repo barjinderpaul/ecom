@@ -47,3 +47,62 @@ describe('productsIndexMappings', () => {
     }
   });
 });
+
+describe('document shape vs mapping', () => {
+  it('maps every field the DTO produces, so strict mapping cannot reject a document', async () => {
+    const { toProductDetail } = await import('../src/lib/product-dto.js');
+    const document = toProductDetail(
+      {
+        id: 1,
+        title: 't',
+        description: 'd',
+        brand: 'b',
+        sku: 's',
+        price: 1,
+        discount_percentage: 1,
+        rating: 1,
+        stock: 1,
+        weight: 1,
+        width: 1,
+        height: 1,
+        depth: 1,
+        warranty_information: 'w',
+        shipping_information: 's',
+        availability_status: 'a',
+        return_policy: 'r',
+        minimum_order_quantity: 1,
+        barcode: 'b',
+        qr_code: 'q',
+        thumbnail: 't',
+        source_created_at: new Date(0),
+        source_updated_at: new Date(0),
+        category_slug: 'c',
+        category_name: 'C',
+      },
+      {
+        images: ['i'],
+        tags: ['t'],
+        reviews: [
+          { rating: 5, comment: 'c', reviewed_at: new Date(0), reviewer_name: 'n', reviewer_email: 'e' },
+        ],
+      },
+    );
+
+    const unmapped = [];
+    const walk = (value, properties, path) => {
+      for (const [key, child] of Object.entries(value)) {
+        const spec = properties[key];
+        if (!spec) {
+          unmapped.push([...path, key].join('.'));
+          continue;
+        }
+        const sample = Array.isArray(child) ? child[0] : child;
+        if (sample && typeof sample === 'object' && !(sample instanceof Date)) {
+          walk(sample, spec.properties ?? {}, [...path, key]);
+        }
+      }
+    };
+    walk(document, productsIndexMappings.properties, []);
+    assert.deepEqual(unmapped, []);
+  });
+});
