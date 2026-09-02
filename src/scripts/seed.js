@@ -131,8 +131,9 @@ async function writeCatalog(pool, { products, categories }) {
     await writer.replaceProductReviews(
       productIds,
       products.flatMap((p) =>
-        p.reviews.map((r) => ({
+        p.reviews.map((r, position) => ({
           productId: p.id,
+          position,
           rating: r.rating,
           comment: r.comment,
           reviewerName: r.reviewerName,

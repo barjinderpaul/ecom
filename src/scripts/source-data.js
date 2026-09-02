@@ -6,7 +6,7 @@ const finite = z.number().finite();
 
 const reviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
-  comment: z.string().nullable().default(null),
+  comment: z.string().max(1000),
   date: isoDate,
   reviewerName: z.string().min(1).max(255),
   reviewerEmail: z.string().min(1).max(255),
@@ -18,9 +18,9 @@ const productSchema = z.object({
   description: z.string().default(''),
   category: z.string().trim().toLowerCase().min(1).max(100),
   price: finite.min(0),
-  discountPercentage: finite.min(0).max(100).default(0),
-  rating: finite.min(0).max(5).default(0),
-  stock: z.number().int().min(0).default(0),
+  discountPercentage: finite.min(0).max(100),
+  rating: finite.min(0).max(5),
+  stock: z.number().int().min(0),
   tags: z.array(z.string().trim().min(1).max(100)).default([]),
   brand: z.string().trim().min(1).max(100).nullable().default(null),
   sku: z.string().trim().min(1).max(64),
@@ -32,12 +32,12 @@ const productSchema = z.object({
       depth: finite.min(0).nullable().default(null),
     })
     .default({ width: null, height: null, depth: null }),
-  warrantyInformation: z.string().max(255).nullable().default(null),
-  shippingInformation: z.string().max(255).nullable().default(null),
-  availabilityStatus: z.string().max(50).default('In Stock'),
+  warrantyInformation: z.string().trim().min(1).max(255),
+  shippingInformation: z.string().trim().min(1).max(255),
+  availabilityStatus: z.string().trim().min(1).max(50),
   reviews: z.array(reviewSchema).default([]),
-  returnPolicy: z.string().max(255).nullable().default(null),
-  minimumOrderQuantity: z.number().int().min(1).default(1),
+  returnPolicy: z.string().trim().min(1).max(255),
+  minimumOrderQuantity: z.number().int().min(1),
   meta: z
     .object({
       createdAt: isoDate.nullable().default(null),
@@ -47,7 +47,7 @@ const productSchema = z.object({
     })
     .default({ createdAt: null, updatedAt: null, barcode: null, qrCode: null }),
   images: z.array(z.string().max(1024)).default([]),
-  thumbnail: z.string().max(1024).nullable().default(null),
+  thumbnail: z.string().trim().min(1).max(1024),
 });
 
 const categorySchema = z.object({
@@ -90,12 +90,19 @@ function parse(schema, payload, label) {
   return result.data;
 }
 
+function normalise(raw) {
+  return {
+    products: parse(productsPayloadSchema, raw.products, 'products').products,
+    categories: parse(categoriesPayloadSchema, raw.categories, 'categories'),
+  };
+}
+
 async function loadRemote(baseUrl) {
   const [products, categories] = await Promise.all([
     fetchJson(`${baseUrl}/products?limit=0`),
     fetchJson(`${baseUrl}/products/categories`),
   ]);
-  return { products, categories };
+  return normalise({ products, categories });
 }
 
 async function loadSnapshot() {
@@ -103,28 +110,20 @@ async function loadSnapshot() {
     readFile(new URL('products.snapshot.json', snapshotDir), 'utf8').then(JSON.parse),
     readFile(new URL('categories.snapshot.json', snapshotDir), 'utf8').then(JSON.parse),
   ]);
-  return { products, categories };
+  return normalise({ products, categories });
 }
 
 /**
- * Fetches the catalogue from the upstream API, falling back to the snapshot
- * committed in data/ when the network is unavailable and the fallback is
- * enabled. Both sources are validated against the same schema.
+ * Loads and validates the catalogue from the upstream API. When the fetch
+ * fails or the payload no longer matches the expected shape, and the fallback
+ * is enabled, the snapshot committed in data/ is used instead.
  */
 export async function loadSourceData({ baseUrl, fallbackToSnapshot, logger }) {
-  let raw;
-  let origin = 'remote';
   try {
-    raw = await loadRemote(baseUrl.replace(/\/+$/, ''));
+    return { origin: 'remote', ...(await loadRemote(baseUrl.replace(/\/+$/, ''))) };
   } catch (err) {
     if (!fallbackToSnapshot) throw err;
-    logger.warn({ err: err.message, baseUrl }, 'Upstream fetch failed; using bundled snapshot');
-    raw = await loadSnapshot();
-    origin = 'snapshot';
+    logger.warn({ err: err.message, baseUrl }, 'Upstream data unusable; using bundled snapshot');
+    return { origin: 'snapshot', ...(await loadSnapshot()) };
   }
-  return {
-    origin,
-    products: parse(productsPayloadSchema, raw.products, 'products').products,
-    categories: parse(categoriesPayloadSchema, raw.categories, 'categories'),
-  };
 }

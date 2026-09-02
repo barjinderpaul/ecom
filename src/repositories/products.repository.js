@@ -38,7 +38,7 @@ export function createProductsRepository(pool) {
     if (withReviews) {
       [reviewRows] = await pool.query(
         `SELECT product_id, rating, comment, reviewer_name, reviewer_email, reviewed_at
-           FROM product_reviews WHERE product_id IN (?) ORDER BY product_id, reviewed_at, id`,
+           FROM product_reviews WHERE product_id IN (?) ORDER BY product_id, position`,
         [productIds],
       );
     }

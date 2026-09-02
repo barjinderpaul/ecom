@@ -118,8 +118,16 @@ export function createCatalogWriter(connection) {
       await connection.query(`DELETE FROM product_reviews WHERE product_id IN (?)`, [productIds]);
       if (rows.length > 0) {
         await insertRows(
-          `INSERT INTO product_reviews (product_id, rating, comment, reviewer_name, reviewer_email, reviewed_at) VALUES ?`,
-          rows.map((r) => [r.productId, r.rating, r.comment, r.reviewerName, r.reviewerEmail, r.reviewedAt]),
+          `INSERT INTO product_reviews (product_id, position, rating, comment, reviewer_name, reviewer_email, reviewed_at) VALUES ?`,
+          rows.map((r) => [
+            r.productId,
+            r.position,
+            r.rating,
+            r.comment,
+            r.reviewerName,
+            r.reviewerEmail,
+            r.reviewedAt,
+          ]),
         );
       }
     },
