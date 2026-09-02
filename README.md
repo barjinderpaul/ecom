@@ -160,13 +160,14 @@ documents, so a product looks identical regardless of which store answered.
 
 - `categories` (`slug` unique) and `products` with a foreign key to it. The upstream product id is kept as the
   primary key so `/products/{id}` matches the source. `sku` is unique. `brand` is nullable because 92 of the 194
-  upstream products have none; every other attribute is `NOT NULL` because the data always carries it.
+  upstream products have none; weight, dimensions, barcode, QR code and the upstream timestamps are nullable
+  because they are metadata a product can legitimately lack; the merchandising attributes are `NOT NULL`.
 - `product_images`, `product_tags` (through a `tags` lookup table, tags are shared across products) and
   `product_reviews`, each with a `position` column unique per product so upstream ordering is reproduced
   exactly. Child rows cascade on delete.
 - Money and ratings are `DECIMAL`, not floats. Timestamps are `DATETIME(3)` stored in UTC (the pool is opened with
   `timezone: 'Z'`), so upstream ISO timestamps round-trip to the millisecond.
-- `CHECK` constraints guard ranges (price >= 0, rating 0..5, discount 0..100, review rating 1..5).
+- `CHECK` constraints guard ranges (price and dimensions >= 0, rating 0..5, discount 0..100, review rating 1..5).
   Attributes that look enumerated (`availability_status`, `return_policy`) are `VARCHAR`, not `ENUM`, so new
   upstream values do not require an `ALTER TABLE`.
 - Indexes match the read paths: the category-filtered list uses `(category_id, id)`, which also makes

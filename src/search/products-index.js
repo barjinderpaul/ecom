@@ -38,7 +38,7 @@ export const productsIndexSettings = {
 const text = { type: 'text', analyzer: 'product_text' };
 const keyword = { type: 'keyword' };
 const storedOnly = { type: 'keyword', index: false, doc_values: false };
-const money = { type: 'scaled_float', scaling_factor: 100 };
+const twoDecimals = { type: 'scaled_float', scaling_factor: 100 };
 
 export const productsIndexMappings = {
   dynamic: 'strict',
@@ -50,9 +50,9 @@ export const productsIndexMappings = {
     categoryName: text,
     brand: { ...text, fields: { keyword: { type: 'keyword', normalizer: 'lowercase_normalizer' } } },
     sku: keyword,
-    price: money,
-    discountPercentage: money,
-    rating: money,
+    price: twoDecimals,
+    discountPercentage: twoDecimals,
+    rating: twoDecimals,
     stock: { type: 'integer' },
     tags: { ...keyword, fields: { text } },
     weight: { type: 'float' },
