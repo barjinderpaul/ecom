@@ -27,6 +27,15 @@ describe('HTTP API', () => {
     async search(params) {
       searchCalls.push(params);
       if (params.query === 'boom') throw new esErrors.ConnectionError('down');
+      if (params.query === 'bad-mapping') {
+        throw new esErrors.ResponseError({
+          statusCode: 400,
+          body: { error: { type: 'search_phase_execution_exception', reason: 'internal detail' } },
+          headers: {},
+          warnings: [],
+          meta: {},
+        });
+      }
       return { items: [product(7)], total: 1 };
     },
   };
@@ -129,6 +138,18 @@ describe('HTTP API', () => {
     const { status, body } = await get(app.baseUrl, '/products?query=boom');
     assert.equal(status, 503);
     assert.equal(body.error.code, 'SERVICE_UNAVAILABLE');
+  });
+
+  it('does not expose Elasticsearch request errors as client errors', async () => {
+    const { status, body } = await get(app.baseUrl, '/products?query=bad-mapping');
+    assert.equal(status, 500);
+    assert.deepEqual(body, { error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
+  });
+
+  it('rejects a malformed percent-encoded path with 400', async () => {
+    const { status, body } = await get(app.baseUrl, '/products/%E0%A4%A');
+    assert.equal(status, 400);
+    assert.equal(body.error.code, 'BAD_REQUEST');
   });
 
   it('returns a JSON 404 for unknown routes', async () => {

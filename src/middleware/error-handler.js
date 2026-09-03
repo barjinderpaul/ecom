@@ -26,8 +26,12 @@ export function errorHandler(err, req, res, next) {
     return res.status(dependencyError.status).json(serialize(dependencyError));
   }
 
+  // Express marks its own client errors (malformed paths, bad encodings) as
+  // exposable. Anything else carrying a status, such as an Elasticsearch
+  // response error, is an internal failure and must not reach the client.
   const status = Number(err?.status ?? err?.statusCode);
-  if (Number.isInteger(status) && status >= 400 && status < 500) {
+  const exposable = err?.expose === true || err instanceof URIError;
+  if (exposable && Number.isInteger(status) && status >= 400 && status < 500) {
     return res.status(status).json({ error: { code: 'BAD_REQUEST', message: err.message } });
   }
 

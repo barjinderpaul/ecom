@@ -12,7 +12,10 @@ const schema = z.object({
   MYSQL_DATABASE: z.string().min(1).default('ecommerce'),
 
   ELASTICSEARCH_URL: z.url().default('http://localhost:9200'),
-  ELASTICSEARCH_INDEX: z.string().min(1).default('products'),
+  ELASTICSEARCH_INDEX: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9_-]*$/, 'must be a lowercase Elasticsearch index name')
+    .default('products'),
 
   DATA_SOURCE_URL: z.url().default('https://dummyjson.com'),
   SEED_FALLBACK_TO_SNAPSHOT: z

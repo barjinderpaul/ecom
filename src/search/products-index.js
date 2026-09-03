@@ -121,7 +121,6 @@ export function buildSearchBody({ query, category, from, size }) {
               operator: 'or',
               fuzziness: 'AUTO',
               prefix_length: 1,
-              max_expansions: 50,
               fields: SEARCH_FIELDS,
             },
           },

@@ -60,7 +60,8 @@ await check('GET /products pages through MySQL in id order', async () => {
   const second = await get('/products?page=2&limit=5');
   assert.equal(second.body.pagination.page, 2);
   assert.equal(second.body.data.length, Math.min(5, Math.max(total - 5, 0)));
-  assert.ok(second.body.data.every((p) => p.id > first.body.data[4].id));
+  const lastOnFirstPage = first.body.data.at(Math.min(4, first.body.data.length - 1)).id;
+  assert.ok(second.body.data.every((p) => p.id > lastOnFirstPage));
 
   const beyond = await get(`/products?page=${Math.ceil(total / 20) + 1}`);
   assert.equal(beyond.status, 200);

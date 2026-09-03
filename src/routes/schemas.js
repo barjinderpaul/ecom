@@ -35,7 +35,6 @@ export const listProductsQuerySchema = z.object({
     z
       .string({ error: 'must be a single value' })
       .trim()
-      .min(1)
       .max(200, 'must be at most 200 characters')
       .optional(),
   ),

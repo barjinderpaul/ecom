@@ -19,8 +19,16 @@ export async function rebuildProductsIndex({ client, alias, documents, batchSize
     await deletePrevious({ client, indices: replaced, logger });
     return { index, count, replaced };
   } catch (err) {
-    if (!swapped) await client.indices.delete({ index }, { ignore: [404] });
+    if (!swapped) await discard({ client, index, logger });
     throw err;
+  }
+}
+
+async function discard({ client, index, logger }) {
+  try {
+    await client.indices.delete({ index }, { ignore: [404] });
+  } catch (err) {
+    logger?.warn({ err, index }, 'Half-built index could not be deleted');
   }
 }
 

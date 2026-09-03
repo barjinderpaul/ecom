@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { toProductDetail } from '../src/lib/product-dto.js';
 import { buildSearchBody, productsIndexMappings, SEARCH_FIELDS } from '../src/search/products-index.js';
 
 describe('buildSearchBody', () => {
@@ -49,8 +50,7 @@ describe('productsIndexMappings', () => {
 });
 
 describe('document shape vs mapping', () => {
-  it('maps every field the DTO produces, so strict mapping cannot reject a document', async () => {
-    const { toProductDetail } = await import('../src/lib/product-dto.js');
+  it('maps every field the DTO produces, so strict mapping cannot reject a document', () => {
     const document = toProductDetail(
       {
         id: 1,
