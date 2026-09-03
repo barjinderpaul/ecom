@@ -93,7 +93,7 @@ export function createProductsRepository(pool) {
 
     /**
      * Streams every product as a full detail DTO in id order, in batches, for
-     * indexing. Keyset pagination so it scales past the toy dataset.
+     * indexing. Keyset pagination keeps memory flat however large the catalogue.
      */
     async *iterateAllDetailed({ batchSize = 500 } = {}) {
       let lastId = 0;

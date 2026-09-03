@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS products (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS product_images (
-  id         INT UNSIGNED     NOT NULL AUTO_INCREMENT,
+  id         INT UNSIGNED      NOT NULL AUTO_INCREMENT,
   product_id INT UNSIGNED      NOT NULL,
   position   SMALLINT UNSIGNED NOT NULL,
   url        VARCHAR(1024)     NOT NULL,
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS product_tags (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS product_reviews (
-  id             INT UNSIGNED     NOT NULL AUTO_INCREMENT,
+  id             INT UNSIGNED      NOT NULL AUTO_INCREMENT,
   product_id     INT UNSIGNED      NOT NULL,
   position       SMALLINT UNSIGNED NOT NULL,
   rating         TINYINT UNSIGNED  NOT NULL,

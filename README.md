@@ -14,8 +14,8 @@ docker compose up --build
 
 Startup order is enforced with health checks: MySQL and Elasticsearch come up first, the `seed` container fetches
 the data, writes MySQL, builds the search index and exits, and only then does the `api` container start on
-<http://localhost:3000>. The first run downloads about 3 GB of images and takes a few minutes; later runs
-take under a minute. Every container has a memory limit (Elasticsearch 1.25 GB, MySQL 512 MB, seed and API
+<http://localhost:3000>. The first run downloads about 3 GB of images; later runs skip the download and only
+wait for the databases to start. Every container has a memory limit (Elasticsearch 1.25 GB, MySQL 512 MB, seed and API
 256 MB each), so the whole stack stays under about 2.3 GB. MySQL and Elasticsearch are also published, on
 `127.0.0.1:3307` and `127.0.0.1:9201`, so they never collide with instances you may already run locally.
 
@@ -228,7 +228,7 @@ category becomes a filter inside the search.
 - The Docker image runs as the unprivileged `node` user, installs production dependencies only, and every
   container has a memory limit so the stack behaves on a laptop. Database and search ports are bound to
   loopback because Elasticsearch runs with security disabled.
-- `docker compose up` a second time re-runs the seed (a few seconds); data volumes persist across restarts.
+- `docker compose up` a second time re-runs the seed, which is idempotent; data volumes persist across restarts.
 
 ## Known limitations
 
@@ -243,4 +243,5 @@ category becomes a filter inside the search.
 - Reviewers are stored per review (name and e-mail) because the upstream data has no reviewer ids to build a
   users table from.
 - Elasticsearch runs as a single node with security disabled, which is appropriate for local development only.
-- Search relevance was tuned by inspecting results, not measured against a labelled query set.
+- Search relevance follows from the field weights described above; it has not been measured against a labelled
+  query set.

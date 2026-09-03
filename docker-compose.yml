@@ -34,7 +34,7 @@ services:
     healthcheck:
       # -h 127.0.0.1 forces TCP so the temporary socket-only server used during
       # first-run initialisation does not report healthy prematurely.
-      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '--silent']
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -uroot -p"$$MYSQL_ROOT_PASSWORD" --silent']
       interval: 5s
       timeout: 5s
       retries: 30
