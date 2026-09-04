@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { toProductDetail } from '../src/lib/product-dto.js';
-import { buildSearchBody, productsIndexMappings, SEARCH_FIELDS } from '../src/search/products-index.js';
+import {
+  buildFilters,
+  buildSearchBody,
+  PREFIX_FIELDS,
+  productsIndexMappings,
+  SEARCH_FIELDS,
+} from '../src/search/products-index.js';
 
 describe('buildSearchBody', () => {
   it('builds a relevance query with pagination and no filter by default', () => {
@@ -17,8 +23,27 @@ describe('buildSearchBody', () => {
   });
 
   it('adds an exact category filter when a category is given', () => {
-    const body = buildSearchBody({ query: 'phone', category: 'smartphones', from: 0, size: 20 });
+    const body = buildSearchBody({ query: 'phone', filters: { category: 'smartphones' }, from: 0, size: 20 });
     assert.deepEqual(body.query.bool.filter, [{ term: { category: 'smartphones' } }]);
+  });
+
+  it('turns rating and price filters into unscored range clauses', () => {
+    assert.deepEqual(buildFilters({ minRating: 4, minPrice: 10, maxPrice: 50 }), [
+      { range: { rating: { gte: 4 } } },
+      { range: { price: { gte: 10, lte: 50 } } },
+    ]);
+    assert.deepEqual(buildFilters({ maxPrice: 50 }), [{ range: { price: { lte: 50 } } }]);
+    assert.deepEqual(buildFilters({}), []);
+  });
+
+  it('boosts title prefixes for search-as-you-type', () => {
+    const [, prefix] = buildSearchBody({ query: 'ess', from: 0, size: 1 }).query.bool.should;
+    assert.deepEqual(prefix.multi_match, { query: 'ess', type: 'bool_prefix', fields: PREFIX_FIELDS });
+  });
+
+  it('searches SKUs exactly', () => {
+    assert.ok(SEARCH_FIELDS.includes('sku^2'));
+    assert.equal(productsIndexMappings.properties.sku.type, 'keyword');
   });
 
   it('never searches review text', () => {
@@ -40,12 +65,18 @@ describe('productsIndexMappings', () => {
 
   it('maps every searched field', () => {
     const top = productsIndexMappings.properties;
-    for (const spec of SEARCH_FIELDS) {
+    for (const spec of [...SEARCH_FIELDS, ...PREFIX_FIELDS]) {
       const [path] = spec.split('^');
       const [field, sub] = path.split('.');
       assert.ok(top[field], `${field} is mapped`);
       if (sub) assert.ok(top[field].fields?.[sub], `${path} is mapped`);
     }
+  });
+
+  it('applies synonyms at search time only', () => {
+    const { analyzer } = productsIndexMappings.properties.title;
+    assert.equal(analyzer, 'product_text');
+    assert.equal(productsIndexMappings.properties.title.search_analyzer, 'product_search');
   });
 });
 

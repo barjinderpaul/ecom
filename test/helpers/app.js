@@ -7,6 +7,7 @@ export function startApp(overrides = {}) {
     productsService: overrides.productsService ?? {},
     categoriesService: overrides.categoriesService ?? {},
     healthService: overrides.healthService ?? { check: async () => ({ status: 'ok', checks: {} }) },
+    rateLimitPerMinute: overrides.rateLimitPerMinute ?? 0,
   });
   return new Promise((resolve) => {
     const server = app.listen(0, '127.0.0.1', () => {

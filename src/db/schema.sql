@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS products (
   PRIMARY KEY (id),
   UNIQUE KEY uq_products_sku (sku),
   KEY idx_products_category_id (category_id, id),
+  KEY idx_products_price (price),
   CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES categories (id),
   CONSTRAINT chk_products_price CHECK (price >= 0),
   CONSTRAINT chk_products_discount CHECK (discount_percentage BETWEEN 0 AND 100),

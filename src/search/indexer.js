@@ -1,4 +1,42 @@
+import { errors as esErrors } from '@elastic/elasticsearch';
 import { productsIndexMappings, productsIndexSettings } from './products-index.js';
+
+const BULK_ATTEMPTS = 3;
+const RETRYABLE_STATUSES = new Set([429, 503]);
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isTransient(err) {
+  return (
+    err instanceof esErrors.ConnectionError ||
+    err instanceof esErrors.TimeoutError ||
+    (err instanceof esErrors.ResponseError && RETRYABLE_STATUSES.has(err.meta?.statusCode))
+  );
+}
+
+/**
+ * Sends one bulk request, retrying the whole batch when the cluster is
+ * unreachable or back-pressuring (429/503). Re-sending is safe because every
+ * document is indexed under its product id.
+ */
+async function bulkWithRetry(client, operations, logger) {
+  for (let attempt = 1; ; attempt += 1) {
+    let response;
+    try {
+      response = await client.bulk({ operations, refresh: false });
+    } catch (err) {
+      if (attempt === BULK_ATTEMPTS || !isTransient(err)) throw err;
+      logger?.warn({ err: err.message, attempt }, 'Bulk request failed; retrying');
+      await sleep(500 * attempt);
+      continue;
+    }
+    const failed = response.errors ? response.items.filter((item) => item.index?.error) : [];
+    const retryable = failed.length > 0 && failed.every((item) => RETRYABLE_STATUSES.has(item.index.status));
+    if (!retryable || attempt === BULK_ATTEMPTS) return response;
+    logger?.warn({ failed: failed.length, attempt }, 'Bulk items rejected under load; retrying');
+    await sleep(500 * attempt);
+  }
+}
 
 /**
  * Builds a brand-new index, bulk-loads every document into it, then atomically
@@ -12,7 +50,7 @@ export async function rebuildProductsIndex({ client, alias, documents, batchSize
 
   let swapped = false;
   try {
-    const count = await bulkLoad({ client, index, documents, batchSize });
+    const count = await bulkLoad({ client, index, documents, batchSize, logger });
     await client.indices.refresh({ index });
     const replaced = await swapAlias({ client, alias, index, logger });
     swapped = true;
@@ -44,14 +82,14 @@ async function deletePrevious({ client, indices, logger }) {
   }
 }
 
-async function bulkLoad({ client, index, documents, batchSize }) {
+async function bulkLoad({ client, index, documents, batchSize, logger }) {
   let count = 0;
   let batch = [];
 
   const flush = async () => {
     if (batch.length === 0) return;
     const operations = batch.flatMap((doc) => [{ index: { _index: index, _id: String(doc.id) } }, doc]);
-    const response = await client.bulk({ operations, refresh: false });
+    const response = await bulkWithRetry(client, operations, logger);
     if (response.errors) {
       const failures = response.items
         .filter((item) => item.index?.error)

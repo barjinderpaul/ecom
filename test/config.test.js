@@ -22,6 +22,7 @@ describe('loadConfig', () => {
     ['an invalid URL', { ELASTICSEARCH_URL: 'not a url' }],
     ['an upper-case index name', { ELASTICSEARCH_INDEX: 'Products' }],
     ['a non-boolean fallback flag', { SEED_FALLBACK_TO_SNAPSHOT: 'yes' }],
+    ['a negative rate limit', { RATE_LIMIT_PER_MINUTE: '-1' }],
   ]) {
     it(`rejects ${name} with a readable message`, () => {
       assert.throws(() => loadConfig(env), /Invalid configuration: /);

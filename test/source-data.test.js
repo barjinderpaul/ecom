@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
-import { categoriesPayloadSchema, productsPayloadSchema } from '../src/scripts/source-data.js';
+import { categoriesPayloadSchema, normalise, productsPayloadSchema } from '../src/scripts/source-data.js';
 
 const snapshot = JSON.parse(
   await readFile(new URL('../data/products.snapshot.json', import.meta.url), 'utf8'),
@@ -71,6 +71,64 @@ describe('productsPayloadSchema', () => {
       assert.equal(productsPayloadSchema.safeParse({ products: [{ ...sample, ...patch }] }).success, false);
     });
   }
+});
+
+describe('normalise', () => {
+  const run = (patch) =>
+    normalise({
+      products: { products: [{ ...sample, ...patch }] },
+      categories: [{ slug: 'beauty', name: 'Beauty' }],
+    });
+
+  it('collapses whitespace, strips control characters and NFC-normalises text', () => {
+    const { products, report } = run({
+      title: '  Essence\u0007  Mascara\tLash  Princess ',
+      brand: 'Esse\u0301nce',
+    });
+    assert.equal(products[0].title, 'Essence Mascara Lash Princess');
+    assert.equal(products[0].brand, 'Esse\u0301nce'.normalize('NFC'));
+    assert.deepEqual(report, { truncated: {}, dropped: {}, deduplicated: {} });
+  });
+
+  it('keeps paragraph breaks in descriptions but tidies the rest', () => {
+    const { products } = run({ description: 'Line one.  \r\n\r\n\r\n  Line two.\t' });
+    assert.equal(products[0].description, 'Line one.\n\nLine two.');
+  });
+
+  it('truncates over-long text to the column limit and reports it', () => {
+    const { products, report } = run({
+      title: 'x'.repeat(300),
+      reviews: [{ ...sample.reviews[0], comment: 'y'.repeat(1500) }],
+    });
+    assert.equal(products[0].title.length, 255);
+    assert.equal(products[0].reviews[0].comment.length, 1000);
+    assert.deepEqual(report.truncated, { title: 1, 'reviews.comment': 1 });
+  });
+
+  it('never truncates identifiers', () => {
+    assert.throws(() => run({ sku: 's'.repeat(65) }), /sku/);
+  });
+
+  it('drops duplicate and over-long image URLs and reports them', () => {
+    const { products, report } = run({
+      images: ['https://x/1.webp', 'https://x/1.webp ', 'https://x/' + 'a'.repeat(1100)],
+    });
+    assert.deepEqual(products[0].images, ['https://x/1.webp']);
+    assert.deepEqual(report.deduplicated, { images: 1 });
+    assert.deepEqual(report.dropped, { images: 1 });
+  });
+
+  it('lower-cases reviewer e-mail addresses', () => {
+    const { products } = run({
+      reviews: [{ ...sample.reviews[0], reviewerEmail: ' Eleanor.Collins@X.dummyjson.com ' }],
+    });
+    assert.equal(products[0].reviews[0].reviewerEmail, 'eleanor.collins@x.dummyjson.com');
+  });
+
+  it('reports nothing for the bundled snapshot', () => {
+    const { report } = normalise({ products: snapshot, categories: [] });
+    assert.deepEqual(report, { truncated: {}, dropped: {}, deduplicated: {} });
+  });
 });
 
 describe('categoriesPayloadSchema', () => {

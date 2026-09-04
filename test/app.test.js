@@ -7,11 +7,13 @@ import { get, startApp } from './helpers/app.js';
 
 const product = (id) => ({ id, title: `Product ${id}`, category: 'beauty' });
 
-function fakeRepository() {
+function fakeRepository(pageCalls) {
   const all = Array.from({ length: 45 }, (_, i) => product(i + 1));
   return {
-    async findPage({ page, limit, category }) {
-      const filtered = category === undefined ? all : all.filter((p) => p.category === category);
+    async findPage({ page, limit, filters }) {
+      pageCalls.push({ page, limit, filters });
+      const filtered =
+        filters.category === undefined ? all : all.filter((p) => p.category === filters.category);
       return { items: filtered.slice((page - 1) * limit, page * limit), total: filtered.length };
     },
     async findById(id) {
@@ -22,6 +24,7 @@ function fakeRepository() {
 
 describe('HTTP API', () => {
   let app;
+  const pageCalls = [];
   const searchCalls = [];
   const search = {
     async search(params) {
@@ -43,7 +46,7 @@ describe('HTTP API', () => {
   before(async () => {
     app = await startApp({
       productsService: createProductsService({
-        productsRepository: fakeRepository(),
+        productsRepository: fakeRepository(pageCalls),
         productsSearch: search,
       }),
       categoriesService: { list: async () => [{ slug: 'beauty', name: 'Beauty', productCount: 45 }] },
@@ -93,9 +96,43 @@ describe('HTTP API', () => {
       '/products?query=mascara&category=beauty&page=2&limit=10',
     );
     assert.equal(status, 200);
-    assert.deepEqual(searchCalls, [{ query: 'mascara', category: 'beauty', from: 10, size: 10 }]);
+    assert.deepEqual(searchCalls, [
+      { query: 'mascara', filters: { category: 'beauty' }, from: 10, size: 10 },
+    ]);
     assert.deepEqual(body.meta, { source: 'elasticsearch', query: 'mascara', category: 'beauty' });
     assert.deepEqual(body.pagination, { page: 2, limit: 10, total: 1, totalPages: 1 });
+  });
+
+  it('passes rating and price filters to both stores and echoes them in meta', async () => {
+    pageCalls.length = 0;
+    searchCalls.length = 0;
+    const sql = await get(app.baseUrl, '/products?minRating=4&minPrice=10&maxPrice=99.5');
+    assert.equal(sql.status, 200);
+    assert.deepEqual(pageCalls.at(-1).filters, { minRating: 4, minPrice: 10, maxPrice: 99.5 });
+    assert.deepEqual(sql.body.meta, { source: 'mysql', minRating: 4, minPrice: 10, maxPrice: 99.5 });
+
+    const es = await get(app.baseUrl, '/products?query=phone&minRating=4.5');
+    assert.equal(es.status, 200);
+    assert.deepEqual(searchCalls.at(-1).filters, { minRating: 4.5 });
+  });
+
+  it('rejects a price range whose maximum is below its minimum', async () => {
+    const { status, body } = await get(app.baseUrl, '/products?minPrice=50&maxPrice=10');
+    assert.equal(status, 400);
+    assert.deepEqual(
+      body.error.details.map((d) => d.path),
+      ['maxPrice'],
+    );
+  });
+
+  it('serves the OpenAPI document and Swagger UI', async () => {
+    const spec = await get(app.baseUrl, '/openapi.json');
+    assert.equal(spec.status, 200);
+    assert.equal(spec.body.openapi, '3.0.3');
+    assert.deepEqual(Object.keys(spec.body.paths), ['/health', '/categories', '/products', '/products/{id}']);
+    const ui = await fetch(`${app.baseUrl}/docs/`);
+    assert.equal(ui.status, 200);
+    assert.match(await ui.text(), /swagger-ui/);
   });
 
   it('GET /products?query= rejects pages beyond the search result window', async () => {
@@ -162,6 +199,27 @@ describe('HTTP API', () => {
     const { headers } = await get(app.baseUrl, '/categories');
     assert.equal(headers.get('x-powered-by'), null);
     assert.equal(headers.get('x-content-type-options'), 'nosniff');
+  });
+});
+
+describe('rate limiting', () => {
+  it('answers 429 with the error envelope once the per-minute limit is exceeded', async () => {
+    const app = await startApp({
+      rateLimitPerMinute: 2,
+      categoriesService: { list: async () => [] },
+    });
+    try {
+      assert.equal((await get(app.baseUrl, '/categories')).status, 200);
+      assert.equal((await get(app.baseUrl, '/categories')).status, 200);
+      const third = await get(app.baseUrl, '/categories');
+      assert.equal(third.status, 429);
+      assert.deepEqual(third.body, {
+        error: { code: 'RATE_LIMITED', message: 'Too many requests; retry later' },
+      });
+      assert.ok(third.headers.get('ratelimit'));
+    } finally {
+      await app.close();
+    }
   });
 });
 

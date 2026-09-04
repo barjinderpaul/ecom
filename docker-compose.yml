@@ -3,6 +3,7 @@ name: ecommerce-api
 x-app-environment: &app-environment
   NODE_ENV: production
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-300}
   MYSQL_HOST: mysql
   MYSQL_PORT: 3306
   MYSQL_USER: ${MYSQL_USER:-app}

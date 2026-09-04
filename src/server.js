@@ -17,6 +17,7 @@ const searchClient = createSearchClient(config);
 
 const app = createApp({
   logger,
+  rateLimitPerMinute: config.RATE_LIMIT_PER_MINUTE,
   productsService: createProductsService({
     productsRepository: createProductsRepository(pool),
     productsSearch: createProductsSearch({ client: searchClient, index: config.ELASTICSEARCH_INDEX }),
@@ -33,6 +34,8 @@ const app = createApp({
 const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, 'API listening');
 });
+server.requestTimeout = 30_000;
+server.headersTimeout = 20_000;
 
 let shuttingDown = false;
 

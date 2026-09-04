@@ -51,12 +51,30 @@ export function createProductsRepository(pool) {
 
   return {
     /**
-     * Paginated listing ordered by id, optionally filtered by category slug.
+     * Paginated listing ordered by id, optionally filtered by category slug,
+     * minimum rating and price range.
      * @returns {{ items: object[], total: number }}
      */
-    async findPage({ page, limit, category }) {
-      const where = category ? 'WHERE c.slug = ?' : '';
-      const filterParams = category ? [category] : [];
+    async findPage({ page, limit, filters = {} }) {
+      const conditions = [];
+      const filterParams = [];
+      if (filters.category !== undefined) {
+        conditions.push('c.slug = ?');
+        filterParams.push(filters.category);
+      }
+      if (filters.minRating !== undefined) {
+        conditions.push('p.rating >= ?');
+        filterParams.push(filters.minRating);
+      }
+      if (filters.minPrice !== undefined) {
+        conditions.push('p.price >= ?');
+        filterParams.push(filters.minPrice);
+      }
+      if (filters.maxPrice !== undefined) {
+        conditions.push('p.price <= ?');
+        filterParams.push(filters.maxPrice);
+      }
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const offset = (page - 1) * limit;
 
       const [[{ total }]] = await pool.query(

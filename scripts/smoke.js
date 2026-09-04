@@ -137,6 +137,50 @@ await check('GET /products?query=&category= combines search with a category filt
   assert.ok(body.data.every((p) => p.category === detail.category));
 });
 
+await check('rating and price filters apply on both stores', async () => {
+  const sql = await get('/products?minRating=4&minPrice=10&maxPrice=500&limit=100');
+  assert.equal(sql.status, 200);
+  assert.equal(sql.body.meta.source, 'mysql');
+  assert.deepEqual(sql.body.meta, { source: 'mysql', minRating: 4, minPrice: 10, maxPrice: 500 });
+  assert.ok(sql.body.data.every((p) => p.rating >= 4 && p.price >= 10 && p.price <= 500));
+
+  const es = await get(`/products?query=${encodeURIComponent(detail.title)}&minRating=0&maxPrice=999999`);
+  assert.equal(es.status, 200);
+  assert.equal(es.body.meta.source, 'elasticsearch');
+  assert.ok(es.body.data.some((p) => p.id === detail.id));
+
+  const none = await get(`/products?query=${encodeURIComponent(detail.title)}&minRating=5`);
+  assert.equal(none.status, 200);
+  assert.ok(none.body.data.every((p) => p.rating >= 5));
+});
+
+await check('GET /products?query= matches a title prefix (search-as-you-type)', async () => {
+  const prefix = detail.title.split(' ')[0].slice(0, -1);
+  const { status, body } = await get(`/products?query=${encodeURIComponent(prefix)}`);
+  assert.equal(status, 200);
+  assert.ok(
+    body.data.some((p) => p.id === detail.id),
+    `"${prefix}" should match product ${detail.id}`,
+  );
+});
+
+await check('GET /products?query= expands synonyms at search time', async () => {
+  const phones = await get('/products?query=smartphone&limit=100');
+  const cellphones = await get('/products?query=cellphone&limit=100');
+  assert.equal(cellphones.status, 200);
+  assert.ok(phones.body.pagination.total > 0, 'the catalogue should contain smartphones');
+  assert.equal(cellphones.body.pagination.total, phones.body.pagination.total);
+});
+
+await check('GET /docs serves Swagger UI and /openapi.json the document', async () => {
+  const ui = await fetch(`${baseUrl}/docs/`, { signal: AbortSignal.timeout(10_000) });
+  assert.equal(ui.status, 200);
+  assert.match(await ui.text(), /swagger-ui/);
+  const { status, body } = await get('/openapi.json');
+  assert.equal(status, 200);
+  assert.ok(body.paths['/products']);
+});
+
 await check('validation and not-found responses use the error envelope', async () => {
   for (const [path, status, code] of [
     ['/products/abc', 400, 'VALIDATION_ERROR'],
@@ -146,11 +190,34 @@ await check('validation and not-found responses use the error envelope', async (
     ['/products?limit=101', 400, 'VALIDATION_ERROR'],
     ['/products?category=bad%20slug', 400, 'VALIDATION_ERROR'],
     ['/products?query=x&page=101&limit=100', 400, 'VALIDATION_ERROR'],
+    ['/products?minPrice=50&maxPrice=10', 400, 'VALIDATION_ERROR'],
+    ['/products?minRating=6', 400, 'VALIDATION_ERROR'],
     ['/nope', 404, 'NOT_FOUND'],
   ]) {
     const { status: actual, body } = await get(path);
     assert.equal(actual, status, path);
     assert.equal(body.error.code, code, path);
+  }
+});
+
+async function sample(path, runs = 20) {
+  const times = [];
+  for (let i = 0; i < runs; i += 1) {
+    const started = performance.now();
+    const response = await fetch(baseUrl + path, { signal: AbortSignal.timeout(10_000) });
+    await response.arrayBuffer();
+    times.push(performance.now() - started);
+  }
+  times.sort((a, b) => a - b);
+  const at = (q) => times[Math.min(times.length - 1, Math.floor(q * times.length))].toFixed(1);
+  return { p50: at(0.5), p95: at(0.95), max: times.at(-1).toFixed(1) };
+}
+
+await check('latency samples (20 requests each, milliseconds, includes HTTP round trip)', async () => {
+  for (const path of ['/products?limit=20', '/products?query=phone&limit=20', '/products/1']) {
+    const { p50, p95, max } = await sample(path);
+    console.log(`     ${path.padEnd(32)} p50 ${p50}  p95 ${p95}  max ${max}`);
+    assert.ok(Number(p95) < 1000, `${path} p95 ${p95} ms`);
   }
 });
 

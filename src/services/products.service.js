@@ -5,12 +5,12 @@ export function createProductsService({ productsRepository, productsSearch }) {
   return {
     /**
      * Listing is served by MySQL. When a free-text query is present the
-     * request goes to Elasticsearch instead, with the category applied as a
-     * filter so both parameters can be combined.
+     * request goes to Elasticsearch instead. Filters (category, rating, price)
+     * apply on both paths so they can be combined with either.
      */
-    async list({ page, limit, category, query }) {
+    async list({ page, limit, query, filters = {} }) {
       if (query === undefined) {
-        const { items, total } = await productsRepository.findPage({ page, limit, category });
+        const { items, total } = await productsRepository.findPage({ page, limit, filters });
         return { items, total, source: 'mysql' };
       }
 
@@ -20,7 +20,7 @@ export function createProductsService({ productsRepository, productsSearch }) {
           { path: 'page', message: `page * limit must not exceed ${MAX_RESULT_WINDOW}` },
         ]);
       }
-      const { items, total } = await productsSearch.search({ query, category, from, size: limit });
+      const { items, total } = await productsSearch.search({ query, filters, from, size: limit });
       return { items, total, source: 'elasticsearch' };
     },
 

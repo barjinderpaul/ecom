@@ -7,7 +7,9 @@ function fakeClient({
   concreteIndexOnAliasName = false,
   failBulk = false,
   failDeletePrevious = false,
+  rejectFirstBulk = false,
 } = {}) {
+  let bulkCalls = 0;
   const calls = [];
   const client = {
     calls,
@@ -25,6 +27,13 @@ function fakeClient({
     },
     bulk: async (params) => {
       calls.push(['bulk', params.operations.length / 2]);
+      bulkCalls += 1;
+      if (rejectFirstBulk && bulkCalls === 1) {
+        return {
+          errors: true,
+          items: [{ index: { _id: '1', status: 429, error: { type: 'es_rejected_execution_exception' } } }],
+        };
+      }
       if (failBulk) {
         return {
           errors: true,
@@ -84,6 +93,20 @@ describe('rebuildProductsIndex', () => {
     const names = client.calls.map(([name]) => name);
     assert.equal(names.includes('updateAliases'), false);
     assert.deepEqual(client.calls.at(-1), ['delete', client.calls[0][1]]);
+  });
+
+  it('retries a batch rejected under load instead of failing the run', async () => {
+    const warnings = [];
+    const client = fakeClient({ rejectFirstBulk: true });
+    const result = await rebuildProductsIndex({
+      client,
+      alias: 'products',
+      documents: docs(1),
+      logger: { warn: (ctx, msg) => warnings.push(msg) },
+    });
+    assert.equal(result.count, 1);
+    assert.equal(client.calls.filter(([name]) => name === 'bulk').length, 2);
+    assert.equal(warnings.length, 1);
   });
 
   it('keeps the new index when only the old index cleanup fails', async () => {

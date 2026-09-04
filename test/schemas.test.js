@@ -30,6 +30,13 @@ describe('listProductsQuerySchema', () => {
     assert.deepEqual(data, { page: 3, limit: 50, category: 'mens-shoes', query: 'phone' });
   });
 
+  it('parses rating and price filters as numbers', () => {
+    const { data } = parse(listProductsQuerySchema, { minRating: '4', minPrice: '9.99', maxPrice: '100' });
+    assert.equal(data.minRating, 4);
+    assert.equal(data.minPrice, 9.99);
+    assert.equal(data.maxPrice, 100);
+  });
+
   for (const [name, input] of [
     ['page=0', { page: '0' }],
     ['page=-1', { page: '-1' }],
@@ -46,6 +53,11 @@ describe('listProductsQuerySchema', () => {
     ['category leading dash', { category: '-beauty' }],
     ['query too long', { query: 'x'.repeat(201) }],
     ['repeated query', { query: ['a', 'b'] }],
+    ['minRating above 5', { minRating: '5.5' }],
+    ['negative minPrice', { minPrice: '-1' }],
+    ['minPrice with three decimals', { minPrice: '1.999' }],
+    ['non-numeric maxPrice', { maxPrice: 'ten' }],
+    ['maxPrice below minPrice', { minPrice: '10', maxPrice: '5' }],
   ]) {
     it(`rejects ${name}`, () => {
       assert.equal(parse(listProductsQuerySchema, input).success, false);

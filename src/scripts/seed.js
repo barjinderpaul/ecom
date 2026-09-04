@@ -83,6 +83,7 @@ async function writeCatalog(pool, { products, categories }) {
 
   const productTags = new Map(products.map((p) => [p.id, uniqueBy(p.tags, collationKey)]));
   const allTags = uniqueBy([...productTags.values()].flat(), collationKey);
+  const duplicateTags = products.reduce((sum, p) => sum + p.tags.length - productTags.get(p.id).length, 0);
 
   const connection = await pool.getConnection();
   try {
@@ -159,6 +160,7 @@ async function writeCatalog(pool, { products, categories }) {
       products: products.length,
       categories: allCategories.length,
       tags: allTags.length,
+      deduplicated: { tags: duplicateTags },
       removed: { products: removedProducts, tags: removedTags, categories: removedCategories },
     };
   } catch (err) {
@@ -180,6 +182,7 @@ async function main() {
     { origin: source.origin, products: source.products.length, categories: source.categories.length },
     'Loaded source data',
   );
+  logger.info(source.report, 'Source data formatted');
 
   const pool = createPool(config);
   const searchClient = createSearchClient(config);
@@ -203,7 +206,13 @@ async function main() {
     });
     logger.info(indexed, 'Elasticsearch index rebuilt');
 
-    logger.info({ durationMs: Date.now() - startedAt }, 'Seed completed');
+    const durationMs = Date.now() - startedAt;
+    logger.info(
+      { durationMs },
+      `Seed completed: ${written.products} products, ${written.categories} categories, ${written.tags} tags ` +
+        `written to MySQL from ${source.origin}; ${indexed.count} documents indexed into ${indexed.index} ` +
+        `in ${(durationMs / 1000).toFixed(1)}s`,
+    );
   } finally {
     await Promise.allSettled([pool.end(), searchClient.close()]);
   }

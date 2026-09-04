@@ -4,6 +4,7 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(0).default(300),
 
   MYSQL_HOST: z.string().min(1).default('localhost'),
   MYSQL_PORT: z.coerce.number().int().min(1).max(65535).default(3306),
