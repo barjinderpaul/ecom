@@ -86,8 +86,6 @@ npm run smoke         # end-to-end checks and latency sampling against a running
 npm run smoke:ui      # drives Swagger UI in headless Chrome: every operation executed via "Try it out"
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint, format check and the test suite on every push and pull request.
-
 ## API
 
 | Endpoint                           | Source        | Description                                            |
