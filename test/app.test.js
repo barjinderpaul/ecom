@@ -129,6 +129,7 @@ describe('HTTP API', () => {
     const spec = await get(app.baseUrl, '/openapi.json');
     assert.equal(spec.status, 200);
     assert.equal(spec.body.openapi, '3.0.3');
+    assert.deepEqual(spec.body.servers, [{ url: app.baseUrl, description: 'this instance' }]);
     assert.deepEqual(Object.keys(spec.body.paths), ['/health', '/categories', '/products', '/products/{id}']);
     const ui = await fetch(`${app.baseUrl}/docs/`);
     assert.equal(ui.status, 200);

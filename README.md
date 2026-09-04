@@ -401,6 +401,18 @@ described below, not of changing the query shapes.
   runtime validation where it matters (configuration, requests, upstream data).
 - The API never exposes internal errors. Infrastructure failures are `503` so a client can tell "retry later"
   from "you sent something wrong". Elasticsearch errors are never echoed to the client.
+- MySQL as the system of record, even though products in real catalogues carry attributes that differ by
+  category (RAM and screen size for laptops, size and colour for shoes). The assignment asked for MySQL, but I
+  would make the same choice: the part of a product that every other system depends on (identity, SKU, price,
+  stock, category) wants constraints, foreign keys and transactions, which is exactly what a relational store
+  gives and a document store makes you re-implement. The variable part is handled without leaving MySQL: a
+  `JSON` column (`attributes`) with generated columns and indexes on the few hot keys, or a
+  `product_attributes` table (product_id, name, value) when attributes must be enumerable, plus a `nested`
+  `attributes` field in Elasticsearch, which is where attribute filtering and faceting actually run. A
+  document database earns its place when the write model itself is document-shaped and there are no
+  cross-entity constraints to keep, for example a product-content service that only ever reads and writes
+  whole products. The source data here has no variable attributes, so none of this is built; the schema and
+  the mapping are laid out so that adding it is additive.
 - No `/v1` prefix. With a single consumer and no breaking change in sight, a version prefix is ceremony; when
   a second consumer arrives, the prefix goes in with the first breaking change.
 - `/categories` is not paginated: 24 rows that a client needs in full to render a filter menu. If categories

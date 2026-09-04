@@ -58,7 +58,6 @@ export const openApiDocument = {
       'from MySQL; free-text search is served from Elasticsearch. Requests are rate limited per client IP ' +
       '(HTTP 429 with a RateLimit header when exceeded).',
   },
-  servers: [{ url: '/' }],
   tags: [{ name: 'products' }, { name: 'categories' }, { name: 'system' }],
   paths: {
     '/health': {
@@ -115,9 +114,10 @@ export const openApiDocument = {
         tags: ['products'],
         summary: 'List, filter or search products',
         description:
-          'Without `query` the list comes from MySQL ordered by id. With `query` it comes from Elasticsearch ' +
-          'ordered by relevance (title, brand, tags, category and description are searched with typo tolerance). ' +
-          'Filters apply on both paths and can be combined.',
+          'Every parameter is optional and they can be combined. Without `query` the list comes from MySQL ' +
+          'ordered by id. With `query` it comes from Elasticsearch ordered by relevance (title, brand, tags, SKU, ' +
+          'category and description are searched with typo tolerance, synonyms and prefix matching). ' +
+          'Defaults: `page` 1, `limit` 20.',
         parameters: [
           {
             name: 'query',
