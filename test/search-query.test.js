@@ -6,6 +6,7 @@ import {
   buildSearchBody,
   PREFIX_FIELDS,
   productsIndexMappings,
+  productsIndexSettings,
   SEARCH_FIELDS,
 } from '../src/search/products-index.js';
 
@@ -73,10 +74,16 @@ describe('productsIndexMappings', () => {
     }
   });
 
-  it('applies synonyms at search time only', () => {
+  it('applies synonyms at search time only, after stemming', () => {
     const { analyzer } = productsIndexMappings.properties.title;
     assert.equal(analyzer, 'product_text');
     assert.equal(productsIndexMappings.properties.title.search_analyzer, 'product_search');
+    const search = productsIndexSettings.analysis.analyzer.product_search.filter;
+    assert.ok(search.indexOf('product_synonyms') > search.indexOf('english_stemmer'));
+    assert.equal(
+      productsIndexSettings.analysis.analyzer.product_text.filter.includes('product_synonyms'),
+      false,
+    );
   });
 });
 

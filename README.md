@@ -1,46 +1,88 @@
 # E-commerce API
 
-A small product catalogue REST API built with Node.js 22, Express 5, MySQL 8 and Elasticsearch 8.
-The catalogue is seeded from [dummyjson.com/products](https://dummyjson.com/products): products, categories,
-images, tags and reviews are stored relationally in MySQL and indexed for full-text search in Elasticsearch.
+A product catalogue REST API built with Node.js 22, Express 5, MySQL 8 and Elasticsearch 8. The catalogue is
+loaded from [dummyjson.com/products](https://dummyjson.com/products) by an ETL script that writes a normalised
+relational schema in MySQL and a search index in Elasticsearch. Listing, filtering and product detail are served
+from MySQL; free-text search is served from Elasticsearch.
 
 ## Running it
 
-Requirements: Docker with Compose v2. Nothing else needs to be installed.
+Requirements: Docker with Compose v2. Nothing else is installed on your machine.
 
 ```sh
 docker compose up --build
 ```
 
-Startup order is enforced with health checks: MySQL and Elasticsearch come up first, the `seed` container fetches
-the data, writes MySQL, builds the search index and exits, and only then does the `api` container start on
-<http://localhost:3000>. The first run downloads about 3 GB of images; later runs skip the download and only
-wait for the databases to start. Every container has a memory limit (Elasticsearch 1.25 GB, MySQL 512 MB, seed and API
-256 MB each), so the whole stack stays under about 2.3 GB. MySQL and Elasticsearch are also published, on
-`127.0.0.1:3307` and `127.0.0.1:9201`, so they never collide with instances you may already run locally.
+Four containers start in a fixed order enforced by health checks: MySQL and Elasticsearch first, then the `seed`
+container (fetch, normalise, write MySQL, build the search index, exit), and only then the `api` container on
+<http://localhost:3000>. With images already present this takes about 20 seconds on a laptop (measured 18 s to
+all four services healthy with Docker given 3 CPUs and 4 GB: MySQL and Elasticsearch are healthy after roughly
+15 s, the ETL takes 1.5 s, and the API passes its first health check a few seconds later). The first run also
+downloads about 3 GB of images and builds the API image, which depends entirely on your connection.
 
-On a Linux host without Docker Desktop, Elasticsearch may need `sudo sysctl -w vm.max_map_count=262144` once.
+Every container has a memory limit (Elasticsearch 1.25 GB, MySQL 512 MB, seed and API 256 MB each), so the
+stack stays under about 2.3 GB. MySQL and Elasticsearch are published on `127.0.0.1:3307` and `127.0.0.1:9201`
+so they never collide with instances you already run. On a Linux host without Docker Desktop, Elasticsearch may
+need `sudo sysctl -w vm.max_map_count=262144` once.
+
+| Command                        | What it does                                                            |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| `docker compose ps`            | Status of the four services; `api` should be `healthy`, `seed` exited 0 |
+| `docker compose logs seed`     | The ETL run: what was fetched, formatted, written and indexed           |
+| `docker compose logs -f api`   | One JSON line per request                                               |
+| `docker compose run --rm seed` | Re-runs the ETL (idempotent)                                            |
+| `docker compose down`          | Stops everything, keeps the data volumes                                |
+| `docker compose down -v`       | Stops everything and deletes the data (needed after schema edits)       |
+
+Ports and credentials can be overridden by copying `.env.example` to `.env`; every value has a default.
+
+### Trying the API
+
+Swagger UI: <http://localhost:3000/docs> (every endpoint, parameter and response can be executed from the
+browser). The raw OpenAPI document is at <http://localhost:3000/openapi.json>.
 
 ```sh
 curl 'http://localhost:3000/health'
 curl 'http://localhost:3000/categories'
 curl 'http://localhost:3000/products?limit=5'
 curl 'http://localhost:3000/products/1'
-curl 'http://localhost:3000/products?query=mascara'
 curl 'http://localhost:3000/products?category=smartphones'
-curl 'http://localhost:3000/products?query=phone&category=smartphones&page=1&limit=10'
+curl 'http://localhost:3000/products?query=mascara'                 # full text
+curl 'http://localhost:3000/products?query=mascra'                  # typo tolerant
+curl 'http://localhost:3000/products?query=cellphone'               # synonym of phone / smartphone
+curl 'http://localhost:3000/products?query=essenc'                  # prefix, search-as-you-type
+curl 'http://localhost:3000/products?query=phone&category=smartphones&minRating=4&maxPrice=1000'
+curl 'http://localhost:3000/products?minPrice=10&maxPrice=50&page=2&limit=10'
 ```
 
-Useful commands:
+### Looking inside MySQL
 
-| Command                        | What it does                                                           |
-| ------------------------------ | ---------------------------------------------------------------------- |
-| `docker compose down`          | Stops the stack, keeps the data volumes                                |
-| `docker compose down -v`       | Stops the stack and deletes the data (required after schema edits)     |
-| `docker compose run --rm seed` | Re-fetches the data and rebuilds MySQL and the search index            |
-| `npm run smoke`                | Runs end-to-end checks against a running stack (`API_URL` to override) |
+```sh
+docker compose exec mysql mysql -uapp -papp ecommerce            # interactive shell
+docker compose exec mysql mysql -uapp -papp ecommerce -e 'SHOW TABLES'
+docker compose exec mysql mysql -uapp -papp ecommerce -e 'SHOW CREATE TABLE products\G'
+docker compose exec mysql mysql -uapp -papp ecommerce -e '
+  SELECT p.id, p.title, c.slug, p.price, GROUP_CONCAT(t.name ORDER BY pt.position) AS tags
+    FROM products p JOIN categories c ON c.id = p.category_id
+    LEFT JOIN product_tags pt ON pt.product_id = p.id LEFT JOIN tags t ON t.id = pt.tag_id
+   GROUP BY p.id ORDER BY p.id LIMIT 5'
+```
 
-Ports and credentials can be overridden by copying `.env.example` to `.env`; every value has a default.
+From a client on your machine: host `127.0.0.1`, port `3307`, user `app`, password `app`, database `ecommerce`.
+
+### Looking inside Elasticsearch
+
+```sh
+curl -s 'http://127.0.0.1:9201/_cat/aliases/products?v'      # the physical index behind the alias
+curl -s 'http://127.0.0.1:9201/_cat/indices?v'
+curl -s 'http://127.0.0.1:9201/products/_mapping'
+curl -s 'http://127.0.0.1:9201/products/_count'
+curl -s 'http://127.0.0.1:9201/products/_search' -H 'content-type: application/json' -d '{
+  "query": { "multi_match": { "query": "mascra", "fields": ["title^3", "description"], "fuzziness": "AUTO" } },
+  "_source": ["id", "title", "category", "price"], "size": 3 }'
+curl -s 'http://127.0.0.1:9201/products/_analyze' -H 'content-type: application/json' \
+  -d '{ "analyzer": "product_search", "text": "Women'"'"'s cellphones" }'
+```
 
 ### Without Docker
 
@@ -53,7 +95,7 @@ MYSQL_PORT=3307 ELASTICSEARCH_URL=http://localhost:9201 npm run seed   # tables,
 MYSQL_PORT=3307 ELASTICSEARCH_URL=http://localhost:9201 npm start      # or: npm run dev
 ```
 
-Configuration is read from environment variables, validated at startup (`src/config.js`):
+Configuration is read from environment variables and validated at startup (`src/config.js`):
 
 | Variable                        | Default                 |
 | ------------------------------- | ----------------------- |
@@ -65,51 +107,62 @@ Configuration is read from environment variables, validated at startup (`src/con
 | `ELASTICSEARCH_INDEX`           | `products`              |
 | `DATA_SOURCE_URL`               | `https://dummyjson.com` |
 | `SEED_FALLBACK_TO_SNAPSHOT`     | `true`                  |
+| `RATE_LIMIT_PER_MINUTE`         | `300` (0 disables)      |
 | `LOG_LEVEL`                     | `info`                  |
 
 ### Tests and linting
 
 ```sh
-npm test            # unit and HTTP tests, no database needed
-npm run lint        # eslint
-npm run format:check
+npm test              # unit and HTTP tests against in-memory fakes; no database needed
+npm run lint          # eslint
+npm run format:check  # prettier
+npm run smoke         # end-to-end checks and latency sampling against a running stack (API_URL to override)
 ```
+
+CI (`.github/workflows/ci.yml`) runs lint, format check and the test suite on every push and pull request.
 
 ## API
 
-| Endpoint                                     | Source        | Description                                            |
-| -------------------------------------------- | ------------- | ------------------------------------------------------ |
-| `GET /health`                                | both          | `200` when MySQL and Elasticsearch respond, else `503` |
-| `GET /categories`                            | MySQL         | All categories with their product count, by name       |
-| `GET /products`                              | MySQL         | Paginated list ordered by id                           |
-| `GET /products?category={slug}`              | MySQL         | Same list filtered by category slug                    |
-| `GET /products?query={text}`                 | Elasticsearch | Full-text search ordered by relevance                  |
-| `GET /products?query={text}&category={slug}` | Elasticsearch | Search restricted to one category                      |
-| `GET /products/{id}`                         | MySQL         | One product including its reviews                      |
+| Endpoint                           | Source        | Description                                            |
+| ---------------------------------- | ------------- | ------------------------------------------------------ |
+| `GET /health`                      | both          | `200` when MySQL and Elasticsearch respond, else `503` |
+| `GET /categories`                  | MySQL         | Every category with its product count, ordered by name |
+| `GET /products`                    | MySQL         | Paginated list ordered by id                           |
+| `GET /products?category=…`         | MySQL         | Filtered list                                          |
+| `GET /products?query=…`            | Elasticsearch | Full-text search ordered by relevance                  |
+| `GET /products?query=…&category=…` | Elasticsearch | Search restricted to a category                        |
+| `GET /products/{id}`               | MySQL         | One product with its reviews                           |
+| `GET /docs`, `GET /openapi.json`   |               | Swagger UI and the OpenAPI document                    |
 
-Pagination parameters `page` (default 1) and `limit` (default 20, max 100) apply to every list. A page past the
-end returns an empty `data` array, not an error. `category` is matched case-insensitively; an unknown category
-yields an empty list. `query` is trimmed and limited to 200 characters; a blank `query` is treated as absent.
+Parameters for `GET /products`:
 
-List responses:
+| Parameter              | Meaning                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `query`                | Free text, up to 200 characters; blank is treated as absent. Switches the source to Elasticsearch |
+| `category`             | Category slug, matched case-insensitively; an unknown slug returns an empty list                  |
+| `minRating`            | Only products rated at least this value (0 to 5)                                                  |
+| `minPrice`, `maxPrice` | Price range; `maxPrice` must not be lower than `minPrice`                                         |
+| `page`                 | 1-based, default 1                                                                                |
+| `limit`                | 1 to 100, default 20                                                                              |
+
+Filters apply on both sources and combine with each other and with `query`. Every list response has the same
+envelope; `meta.source` tells you which store answered and echoes the filters that were applied:
 
 ```json
 {
   "data": [
     { "id": 1, "title": "Essence Mascara Lash Princess", "category": "beauty", "price": 9.99, "...": "..." }
   ],
-  "pagination": { "page": 1, "limit": 20, "total": 194, "totalPages": 10 },
-  "meta": { "source": "elasticsearch", "query": "mascara" }
+  "pagination": { "page": 1, "limit": 20, "total": 1, "totalPages": 1 },
+  "meta": { "source": "elasticsearch", "query": "mascara", "category": "beauty" }
 }
 ```
 
-A product carries the same fields from either store: `id`, `title`, `description`, `category`, `categoryName`,
-`brand` (`null` when unknown), `sku`, `price`, `discountPercentage`, `rating`, `stock`, `tags`, `weight`,
-`dimensions`, `warrantyInformation`, `shippingInformation`, `availabilityStatus`, `returnPolicy`,
-`minimumOrderQuantity`, `thumbnail`, `images` and `meta` (`barcode`, `qrCode`, `createdAt`, `updatedAt`).
+A page past the end returns an empty `data` array, not an error. Search results are paginated exactly like the
+list, and capped at the first 10,000 matches. A product carries the same fields from either store; only
 `GET /products/{id}` adds `reviews`.
 
-Errors always have the same envelope:
+Errors always use one envelope:
 
 ```json
 {
@@ -121,12 +174,13 @@ Errors always have the same envelope:
 }
 ```
 
-| Status | Code                  | When                                                           |
-| ------ | --------------------- | -------------------------------------------------------------- |
-| 400    | `VALIDATION_ERROR`    | Malformed `page`, `limit`, `category`, `query` or `{id}`       |
-| 404    | `NOT_FOUND`           | Unknown product id or route                                    |
-| 503    | `SERVICE_UNAVAILABLE` | MySQL or Elasticsearch unreachable, or the index not built yet |
-| 500    | `INTERNAL_ERROR`      | Anything else; details go to the log, not the client           |
+| Status | Code                  | When                                                                                            |
+| ------ | --------------------- | ----------------------------------------------------------------------------------------------- |
+| 400    | `VALIDATION_ERROR`    | A malformed parameter or `{id}`; `details` names each one                                       |
+| 404    | `NOT_FOUND`           | Unknown product id or route                                                                     |
+| 429    | `RATE_LIMITED`        | More than `RATE_LIMIT_PER_MINUTE` requests from one IP; a `RateLimit` header says when to retry |
+| 503    | `SERVICE_UNAVAILABLE` | MySQL or Elasticsearch unreachable, or the catalogue not seeded yet                             |
+| 500    | `INTERNAL_ERROR`      | Anything else; details go to the log, never to the client                                       |
 
 ## Design
 
@@ -134,114 +188,235 @@ Errors always have the same envelope:
 
 ```
 src/
-  app.js                 Express app factory (dependencies injected, so it is testable without infrastructure)
-  server.js              Wires real MySQL/Elasticsearch clients, starts listening, graceful shutdown
+  app.js                 Express app factory; dependencies are injected so it is testable without infrastructure
+  server.js              Wires real MySQL/Elasticsearch clients, request timeouts, graceful shutdown
   config.js              Environment variables validated with zod
-  routes/                HTTP handlers and request schemas
+  routes/                HTTP handlers, request schemas, Swagger
   services/              Use cases: which store answers, pagination limits, 404s
-  repositories/          MySQL reads (products, categories) and the seed's write path (catalog-writer)
+  repositories/          MySQL reads (products, categories) and the ETL's write path (catalog-writer)
   search/                Elasticsearch client, index definition, query builder, alias-swap indexer
   lib/product-dto.js     The single mapper from MySQL rows to the public product shape
   db/schema.sql          MySQL DDL
-  scripts/seed.js        Fetch -> validate -> MySQL -> Elasticsearch
-data/                    Snapshot of the upstream payload, used only if the live fetch fails
+  docs/openapi.js        The OpenAPI document served at /docs
+  scripts/seed.js        The ETL entry point; scripts/source-data.js is extract + transform
+data/                    Snapshot of the upstream payload, used only if the live fetch is unusable
 test/                    node:test suites (npm test)
 scripts/smoke.js         End-to-end checks against a running stack (npm run smoke)
 ```
+
+Suggested reading order: `docker-compose.yml` and `Dockerfile`; then the ETL (`src/scripts/seed.js`,
+`src/scripts/source-data.js`, `src/repositories/catalog-writer.js`, `src/search/indexer.js`) next to
+`src/db/schema.sql` and `src/search/products-index.js`; then `src/app.js`, `src/routes/`, `src/services/`,
+`src/repositories/`, `src/search/`; finally `test/`, which states what each layer guarantees.
 
 Requests flow routes -> services -> repositories or search. Routes only validate and shape HTTP; services decide
 which store to use; repositories and the search module talk to their stores and return DTOs. One mapper,
 `toProductDetail`, produces the product shape both when serving from MySQL and when building Elasticsearch
 documents, so a product looks identical regardless of which store answered.
 
+### ETL pipeline
+
+```mermaid
+flowchart LR
+  A[dummyjson.com<br/>/products?limit=0<br/>/products/categories] -->|fetch, 2 attempts,<br/>10 s timeout| B[Format<br/>NFC, whitespace, control chars,<br/>truncate to column limits,<br/>drop duplicate images]
+  S[(data/*.snapshot.json)] -.->|fallback when fetch<br/>or shape fails| B
+  B --> C[Validate<br/>zod schema, slugify categories,<br/>blank brand -> null]
+  C --> D[Deduplicate<br/>ids, SKUs, tags<br/>collation-aware]
+  D --> E[(MySQL<br/>one transaction:<br/>upsert categories, tags, products;<br/>replace images, tags, reviews;<br/>delete vanished products;<br/>prune orphans)]
+  E -->|read back through the<br/>API's own repository| F[Bulk index<br/>500 docs per request,<br/>retry on 429/503]
+  F --> G[(Elasticsearch<br/>products-&lt;timestamp&gt;)]
+  G -->|atomic alias swap,<br/>old index deleted| H{{alias: products}}
+```
+
+| Stage       | What happens                                                                                                                                                         | On failure                                                                      |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Extract     | Two endpoints fetched in parallel, two attempts each with backoff, 10 s timeout                                                                                      | Falls back to the committed snapshot (unless `SEED_FALLBACK_TO_SNAPSHOT=false`) |
+| Format      | See the rules below; every change is counted in a report                                                                                                             | Never fails; identity fields are left for validation                            |
+| Validate    | Shape, ranges, lengths; categories slugified; empty brand becomes `null`; blank tags and images dropped                                                              | The payload is treated as unusable, so the snapshot is used                     |
+| Deduplicate | Product ids must be unique; SKUs must be unique case- and accent-insensitively; tags deduplicated per product and globally with the same rule MySQL's collation uses | The run stops before touching the database                                      |
+| Load MySQL  | Wait for the database (up to 2 min); apply `schema.sql`; one transaction with batched multi-row upserts                                                              | Rollback; non-zero exit; the API container does not start                       |
+| Load search | Wait for the cluster; read every product back through the same repository the API uses; bulk into a new index; refresh; swap alias; delete the old index             | A half-built index is deleted; the previous index keeps serving                 |
+| Report      | JSON log line per stage plus a final summary: counts, source (`remote` or `snapshot`), truncations, drops, removed rows, index name, duration                        |                                                                                 |
+
+Text formatting rules, in order: Unicode NFC (so "é" typed as one code point or as two is stored once and matches
+once), whitespace collapsed for single-line fields, `\r\n` normalised and paragraph breaks kept for descriptions
+and review comments, control characters removed (they appear in catalogues pasted from spreadsheets and PDFs),
+then truncation to the column limit with a count in the report. Identifiers (id, SKU, barcode) are never
+truncated: a shortened identifier is a different identifier, so an over-long one rejects the payload instead.
+Reviewer e-mail addresses are lower-cased. Duplicate image URLs within a product are dropped, as are URLs over
+1,024 characters.
+
+Idempotency: re-running the ETL is safe. Products are upserted by id, child rows are replaced, products that
+disappeared upstream are deleted (child rows cascade), and unreferenced tags and categories are pruned. The
+search index is rebuilt from scratch each time and swapped in atomically, so a mapping change never needs a
+manual migration. A payload with zero products is refused rather than emptying the catalogue.
+
 ### MySQL schema
 
-`db/schema.sql` normalises the upstream JSON into six tables:
+`db/schema.sql` normalises the upstream JSON into six tables. I profiled the data before designing it: 194
+products in 24 categories, unique SKUs, brand missing on 92 products, one to three tags and one to six images
+per product, exactly three reviews each, and the numeric ranges and string lengths that set the column types.
 
-- `categories` (`slug` unique) and `products` with a foreign key to it. The upstream product id is kept as the
-  primary key so `/products/{id}` matches the source. `sku` is unique. `brand` is nullable because 92 of the 194
-  upstream products have none; weight, dimensions, barcode, QR code and the upstream timestamps are nullable
-  because they are metadata a product can legitimately lack; the merchandising attributes are `NOT NULL`.
-- `product_images`, `product_tags` (through a `tags` lookup table, tags are shared across products) and
-  `product_reviews`, each with a `position` column unique per product so upstream ordering is reproduced
-  exactly. Child rows cascade on delete.
-- Money and ratings are `DECIMAL`, not floats. Timestamps are `DATETIME(3)` stored in UTC (the pool is opened with
-  `timezone: 'Z'`), so upstream ISO timestamps round-trip to the millisecond.
-- `CHECK` constraints guard ranges (price and dimensions >= 0, rating 0..5, discount 0..100, review rating 1..5).
-  Attributes that look enumerated (`availability_status`, `return_policy`) are `VARCHAR`, not `ENUM`, so new
-  upstream values do not require an `ALTER TABLE`.
-- Indexes match the read paths: the category-filtered list uses `(category_id, id)`, which also makes
-  `ORDER BY id` a plain index walk; everything else is served by primary or unique keys.
+| Table             | Purpose                              | Keys and constraints                                                                                                   |
+| ----------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `categories`      | slug, name                           | slug unique                                                                                                            |
+| `products`        | scalar attributes; upstream id as PK | sku unique; FK to categories; CHECK on price, discount, rating, dimensions; indexes on `(category_id, id)` and `price` |
+| `product_images`  | ordered image URLs                   | unique `(product_id, position)`; cascade delete                                                                        |
+| `tags`            | shared tag vocabulary                | name unique under a case- and accent-insensitive collation                                                             |
+| `product_tags`    | many-to-many, ordered                | PK `(product_id, tag_id)`; unique `(product_id, position)`                                                             |
+| `product_reviews` | ordered reviews                      | unique `(product_id, position)`; CHECK rating 1..5                                                                     |
+
+Decisions and why:
+
+- One-to-many data (images, reviews) becomes a child table; many-to-many (tags) becomes a vocabulary plus a
+  junction table, so "all products tagged `mascara`" is an index lookup, not a `LIKE` over a comma list.
+- The upstream id stays the primary key so `/products/{id}` returns the same product as the source site.
+- `brand` is nullable because 92 of the 194 products have none. Weight, dimensions, barcode, QR code and the
+  upstream timestamps are nullable because they are metadata a product can legitimately lack. Everything a
+  shopper sees (title, description, prices, policies, availability) is `NOT NULL`.
+- Money and ratings are `DECIMAL`, sized to the measured ranges; a float would turn 9.99 into 9.9900000000000002.
+  Timestamps are `DATETIME(3)` stored in UTC, so an upstream `2025-04-30T09:41:02.053Z` comes back unchanged
+  whatever timezone the server runs in.
+- `VARCHAR` rather than `ENUM` for enumerated-looking text (`availability_status`, `return_policy`): when the
+  supplier adds "Pre-order", the ETL keeps working instead of failing on an `ALTER TABLE` nobody ran.
+- `position` columns make ordering a contract: the first image is the hero image, and a re-run of the ETL
+  reproduces the same order.
+- Indexes follow the read paths: `(category_id, id)` serves the category filter, its `COUNT` and `ORDER BY id`
+  in one index walk with no sort; `price` serves the price range filter; the unique `(product_id, position)`
+  keys serve both the per-product lookups and the ordering; everything else is a primary or unique key.
+
+Normalisation: the core tables are in third normal form. Two deliberate deviations: reviewer name and e-mail
+are repeated per review rather than held in a `reviewers` table, because the upstream data has no reviewer
+identity and inventing one from an e-mail address would assert something the source does not; and
+`availability_status` is stored although it is derivable from `stock` in this dataset, because real catalogues
+decouple the two ("Pre-order", "Discontinued", per-product low-stock thresholds).
 
 ### Elasticsearch index
 
-`search/products-index.js` defines the index. The document is the full product DTO, including reviews, so a
-search hit can be returned as-is (reviews are excluded from search responses via `_source`).
+`search/products-index.js` defines the index. The document is the full product, reviews included, so a search
+hit is returned to clients without another lookup.
 
-- `dynamic: strict`: a document with an unexpected field is rejected instead of silently creating a mapping.
-  A unit test checks that every field the mapper produces is mapped.
-- A custom `product_text` analyzer (possessive stemmer, lowercase, ASCII folding, English stop words, English
-  stemmer) is applied to `title`, `description`, `brand`, `categoryName` and the `.text` sub-fields of
-  `category` and `tags`. The base `category` and `tags` fields stay `keyword` for exact filtering.
-- `price`, `discountPercentage` and `rating` are `scaled_float` (factor 100), which stores exact cents.
-  URLs (`thumbnail`, `images`, `qrCode`) are stored but not indexed. Reviews are `nested`, so a future query
-  such as "rating 5 by reviewer X" would not match across different reviews.
-- The query is a `multi_match` (`best_fields`, `fuzziness: AUTO`) over `title^3`, `brand^2`, `tags^2`,
-  category and description, plus a phrase clause that boosts exact phrases, with the category as a `filter`
-  clause (unscored, cacheable). Results are sorted by score and then id for a stable order across pages.
-  Review text is deliberately not searched: a query like "great" would otherwise match almost every product.
-- The API reads through the alias `products`. The seed builds a fresh timestamped index, bulk-loads it, swaps
-  the alias in one atomic call and deletes the previous index, so a rebuild is never observed half-done and a
-  failed rebuild leaves the old index serving.
+- `dynamic: strict`: a document with an unexpected field is rejected instead of silently creating a mapping. A
+  unit test proves every field the mapper produces is mapped.
+- Two analyzers. `product_text` (index time): standard tokenizer, possessive stemmer, lowercase, ASCII folding,
+  English stop words, English stemmer, so "phones" matches "phone" and "café" matches "cafe". `product_search`
+  (search time) adds a `synonym_graph` filter (phone / smartphone / mobile, laptop / notebook, sneakers /
+  trainers, and so on). Synonyms live on the search side on purpose: the list grows with what shoppers type,
+  and changing it must not require a reindex.
+- `title` has three faces: analysed text for relevance, a normalised `keyword` for exact match and sorting, and
+  a `search_as_you_type` sub-field (edge n-grams plus 2- and 3-word shingles) so "essenc" and "essence masc"
+  already rank the mascara first while the shopper is still typing.
+- `category` and `tags` are `keyword` for exact filters and facets, with a `.text` sub-field for search.
+  `sku` is `keyword` and searchable, so a SKU pasted into the box finds its product.
+- Money and ratings are `scaled_float` (exact cents), `stock` and `minimumOrderQuantity` are integers, dates
+  are `date`: all of them support range filters and sorting. URLs are stored but not indexed. Reviews are
+  `nested`, so "a five-star review that mentions battery" cannot match a five-star review and a different
+  review that mentions battery.
+- The API reads through the alias `products`. The ETL builds `products-<timestamp>`, bulk-loads it, swaps the
+  alias in one atomic call and deletes the previous index.
+
+The query, and why it is shaped this way:
+
+- A `multi_match` over `title` (×3), `brand` (×2), `tags` (×2), `sku` (×2), category (×1) and `description`
+  (×1), with `fuzziness: AUTO` and a one-character exact prefix. The weights encode where a shopper's words
+  most likely are: the title is short and curated and is what people type ("mascara", "iphone"); brand and
+  tags are exact merchant vocabulary; a SKU is an unambiguous intent; description is long and noisy, and BM25's
+  length normalisation already discounts it, so it gets no boost. These are starting points to be tuned with
+  click data, not laws.
+- Two `should` clauses only add score: a phrase match on title and description (an exact phrase outranks the
+  same words scattered), and a `bool_prefix` match on the title's search-as-you-type field.
+- `category`, `minRating`, `minPrice` and `maxPrice` are `filter` clauses: unscored, cacheable, and they never
+  disturb ranking.
+- Sorted by score, then id, so pages are stable. Review text is deliberately not searched: "great" would match
+  almost every product.
+
+What a shopper can and cannot do today: free text over the fields above, typo tolerance, synonyms, prefixes,
+and structured filters on category, rating and price. "Laptops with 8 GB RAM" works only as far as the words
+appear in titles or descriptions; there is no attribute model (RAM, colour, size) because the source has none.
+When one exists, the natural extension is a `nested` `attributes` field (name, value) with a `terms` facet, and
+the alias swap makes that a reindex with no downtime.
 
 ### Which store answers what
 
-MySQL is the source of truth and serves the listing, the category filter and product detail: those are exact
-queries with exact counts, and the database already has the indexes for them. Elasticsearch is used only when
-`query` is present, because relevance ranking, stemming and typo tolerance are what it is for. The `meta.source`
-field in list responses makes the choice visible. `query` and `category` can be combined, in which case the
-category becomes a filter inside the search.
+MySQL is the source of truth and serves the listing, the filters and product detail: those are exact queries
+with exact counts, and the database already has the indexes for them. Elasticsearch is used only when `query`
+is present, because relevance, stemming, synonyms and typo tolerance are what it is for. `meta.source` makes
+the choice visible. Nothing is ever served from a store it was not designed for: `query` never touches MySQL.
 
-### Seed
+`GET /products` without any filter is allowed on purpose. A catalogue listing is a normal storefront page and
+the assignment asks for it. What keeps it from being abused is the page size cap (100), the per-IP rate limit,
+and the 10,000-match window on search.
 
-`scripts/seed.js` is idempotent and is what runs in the `seed` container:
+### Latency
 
-1. Fetches `/products?limit=0` and `/products/categories`, validating the payload with zod so shape drift
-   upstream fails loudly rather than corrupting the database. If the fetch fails or the payload is unusable,
-   it falls back to the snapshot in `data/` (disable with `SEED_FALLBACK_TO_SNAPSHOT=false`).
-2. Waits for MySQL and Elasticsearch, then applies `schema.sql` (all `CREATE TABLE IF NOT EXISTS`).
-3. In one transaction: upserts categories, tags and products (`INSERT ... AS new ON DUPLICATE KEY UPDATE`),
-   replaces the derived child rows (images, tags, reviews), deletes products that disappeared upstream and
-   prunes unreferenced tags and categories. Multi-row inserts are batched.
-4. Reads every product back through the same repository the API uses and bulk-indexes it into a new
-   Elasticsearch index, then swaps the alias.
+Every request is one or a few indexed queries: a list page is a `COUNT` plus a page query on an index plus two
+`IN (...)` lookups for images and tags (no N+1); a search is one Elasticsearch request with cached filters and
+bounded fuzzy expansion; a detail is four indexed lookups (product, images, tags, reviews). Timeouts fail fast instead of piling up:
+10 s on the Elasticsearch client, 30 s per HTTP request. `npm run smoke` samples twenty requests each against
+the list, search and detail endpoints and prints p50 and p95 so regressions are visible; on this laptop the
+numbers were 3 ms p50 / 5 ms p95 for a list page, 8 ms / 15 ms for a search, and 2 ms / 3 ms for a product
+detail, measured through the Docker port mapping. Keeping p95 under 200 ms at real traffic is a matter of the cache and replicas
+described below, not of changing the query shapes.
 
 ### Other choices
 
-- Express 5 over Fastify or NestJS: four read-only endpoints do not benefit from Fastify's throughput or Nest's
+- Express 5 over Fastify or NestJS: five read-only endpoints do not benefit from Fastify's throughput or Nest's
   structure, Express 5 propagates rejected promises to the error middleware natively, and it is the framework
   most reviewers can read without a primer. Validation is done with zod at the HTTP boundary.
 - Plain JavaScript (ESM) rather than TypeScript keeps `docker compose up` free of a build step; zod provides
   runtime validation where it matters (configuration, requests, upstream data).
-- The API never exposes internal errors. Infrastructure failures are mapped to `503` so clients can tell
-  "retry later" from "bad request".
-- The Docker image runs as the unprivileged `node` user, installs production dependencies only, and every
-  container has a memory limit so the stack behaves on a laptop. Database and search ports are bound to
-  loopback because Elasticsearch runs with security disabled.
-- `docker compose up` a second time re-runs the seed, which is idempotent; data volumes persist across restarts.
+- The API never exposes internal errors. Infrastructure failures are `503` so a client can tell "retry later"
+  from "you sent something wrong". Elasticsearch errors are never echoed to the client.
+- No `/v1` prefix. With a single consumer and no breaking change in sight, a version prefix is ceremony; when
+  a second consumer arrives, the prefix goes in with the first breaking change.
+- `/categories` is not paginated: 24 rows that a client needs in full to render a filter menu. If categories
+  became a tree with thousands of nodes, the same `page`/`limit` envelope would apply.
+- The Docker image runs as the unprivileged `node` user with production dependencies only; every container has
+  a memory limit; database and search ports are bound to loopback because Elasticsearch runs with security off.
+
+## Production considerations (not built, by design)
+
+**Caching.** A flash sale concentrates traffic on a handful of queries and product pages. The shape that fits
+this API is a read-through cache in front of the services layer, keyed by the normalised request (sorted query
+parameters for lists, `product:{id}` for detail), with short TTLs for lists (tens of seconds) and longer for
+detail, stampede protection (one request fills, the rest wait or serve stale), and invalidation by version:
+each ETL run bumps a version key that is part of every cache key, so a re-seed invalidates everything at once
+without scanning. Stock and availability should not come from that cache during a sale; serve catalogue data
+from the cache and overlay live inventory from a cheap key lookup.
+
+```mermaid
+flowchart LR
+  C[Client] --> A[API]
+  A -->|hit| R[(Redis or Aerospike<br/>list:&lt;version&gt;:&lt;params&gt;<br/>product:&lt;version&gt;:&lt;id&gt;)]
+  A -->|miss| M[(MySQL)]
+  A -->|miss, query| E[(Elasticsearch)]
+  M --> R
+  E --> R
+  I[Inventory service] -.->|live stock overlay| A
+  T[ETL run] -.->|bump version key| R
+```
+
+**Rate limiting.** Today: a per-IP token bucket in the process, 300 requests per minute by default, `429` with
+standard `RateLimit` headers. Behind a load balancer the counter has to move to a shared store (Redis) or to the
+gateway, and `trust proxy` must be set so the client IP is read from `X-Forwarded-For`. Authenticated clients
+would be limited per API key rather than per IP.
+
+**Scaling.** The API is stateless, so it scales horizontally behind the load balancer. MySQL reads go to
+replicas; Elasticsearch gets replicas per shard and the ETL's alias swap already supports building an index
+with more primary shards. Incremental updates (a price change, a stock change) would be written to MySQL and
+indexed by product id, which the mapping already supports; the full rebuild stays for schema changes.
 
 ## Known limitations
 
-- Read-only API. There is no authentication, rate limiting or response caching.
-- Elasticsearch is only updated by the seed; there is no incremental sync from MySQL. Re-run the seed to refresh.
+- Read-only API. No authentication, and no caching layer; both are described above rather than built.
+- Elasticsearch is only updated by the ETL; there is no incremental sync from MySQL.
 - Offset pagination only. Search pages are capped at the first 10,000 matches (`index.max_result_window`).
 - Schema changes are not migrated: `schema.sql` uses `CREATE TABLE IF NOT EXISTS`, so after editing it run
   `docker compose down -v` before starting again.
-- If upstream ever moves a SKU from one product id to another between two seeds, the products upsert fails on
-  the unique key; the transaction rolls back and the seed exits non-zero. An upstream payload with zero
-  products is also rejected rather than emptying the catalogue.
-- Reviewers are stored per review (name and e-mail) because the upstream data has no reviewer ids to build a
-  users table from.
+- If upstream ever moves a SKU from one product id to another between two runs, the products upsert fails on
+  the unique key; the transaction rolls back and the run exits non-zero.
+- No reviewers table (no reviewer identity upstream) and no attribute model (RAM, colour, size) because the
+  source has none; both are natural extensions of the current schema and mapping.
 - Elasticsearch runs as a single node with security disabled, which is appropriate for local development only.
-- Search relevance follows from the field weights described above; it has not been measured against a labelled
-  query set.
+- Relevance weights and the synonym list are reasoned starting points; they have not been measured against a
+  labelled query set.

@@ -166,7 +166,7 @@ await check('GET /products?query= matches a title prefix (search-as-you-type)', 
 
 await check('GET /products?query= expands synonyms at search time', async () => {
   const phones = await get('/products?query=smartphone&limit=100');
-  const cellphones = await get('/products?query=cellphone&limit=100');
+  const cellphones = await get('/products?query=cellphones&limit=100');
   assert.equal(cellphones.status, 200);
   assert.ok(phones.body.pagination.total > 0, 'the catalogue should contain smartphones');
   assert.equal(cellphones.body.pagination.total, phones.body.pagination.total);

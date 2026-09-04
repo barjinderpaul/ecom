@@ -16,6 +16,8 @@ export const productsIndexSettings = {
       english_stemmer: { type: 'stemmer', language: 'english' },
       english_possessive_stemmer: { type: 'stemmer', language: 'possessive_english' },
       // Applied at search time only, so the list can grow without a reindex.
+      // Placed after the stemmer so the rules and the query are stemmed alike
+      // ("cellphones" -> "cellphon" matches the rule's "cellphone").
       product_synonyms: {
         type: 'synonym_graph',
         synonyms: [
@@ -48,9 +50,9 @@ export const productsIndexSettings = {
           'english_possessive_stemmer',
           'lowercase',
           'asciifolding',
-          'product_synonyms',
           'english_stop',
           'english_stemmer',
+          'product_synonyms',
         ],
       },
     },
