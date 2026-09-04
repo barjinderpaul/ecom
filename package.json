@@ -15,7 +15,8 @@
     "smoke": "node scripts/smoke.js",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "smoke:ui": "node scripts/swagger-ui-check.mjs"
   },
   "dependencies": {
     "@elastic/elasticsearch": "^8.19.2",
@@ -33,6 +34,7 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^10.9.1",
     "globals": "^17.12.0",
+    "playwright": "^1.62.1",
     "prettier": "^3.9.6"
   }
 }

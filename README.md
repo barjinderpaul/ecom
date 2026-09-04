@@ -120,6 +120,7 @@ npm test              # unit and HTTP tests against in-memory fakes; no database
 npm run lint          # eslint
 npm run format:check  # prettier
 npm run smoke         # end-to-end checks and latency sampling against a running stack (API_URL to override)
+npm run smoke:ui      # drives Swagger UI in headless Chrome: every operation executed via "Try it out"
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint, format check and the test suite on every push and pull request.
