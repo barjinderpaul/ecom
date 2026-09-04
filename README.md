@@ -5,25 +5,29 @@ loaded from [dummyjson.com/products](https://dummyjson.com/products) by an ETL s
 relational schema in MySQL and a search index in Elasticsearch. Listing, filtering and product detail are served
 from MySQL; free-text search is served from Elasticsearch.
 
-## Running it
+## Quick start
 
 Requirements: Docker with Compose v2. Nothing else is installed on your machine.
 
 ```sh
-docker compose up --build
+git clone <this repository> ecommerce-api && cd ecommerce-api
+docker compose up --build -d --wait      # ~20 s once images are cached; first run also downloads ~3 GB
+curl -s http://localhost:3000/health     # {"status":"ok","checks":{"mysql":"up","elasticsearch":"up"}}
+open http://localhost:3000/docs          # Swagger UI (xdg-open on Linux)
+npm ci && npm test                       # 116 unit and HTTP tests, no database needed
+npm run smoke                            # 16 end-to-end checks plus latency samples against the running stack
+docker compose down                      # stop; add -v to also delete the data
 ```
 
-Four containers start in a fixed order enforced by health checks: MySQL and Elasticsearch first, then the `seed`
-container (fetch, normalise, write MySQL, build the search index, exit), and only then the `api` container on
-<http://localhost:3000>. With images already present this takes about 20 seconds on a laptop (measured 18 s to
-all four services healthy with Docker given 3 CPUs and 4 GB: MySQL and Elasticsearch are healthy after roughly
-15 s, the ETL takes 1.5 s, and the API passes its first health check a few seconds later). The first run also
-downloads about 3 GB of images and builds the API image, which depends entirely on your connection.
+What `docker compose up` does, in order: starts MySQL and Elasticsearch and waits for their health checks;
+runs the `seed` container once (fetch, format, validate, write MySQL, build the search index, exit 0); starts
+the `api` container on <http://localhost:3000>. Measured on a laptop with images cached: 18 s to all four
+services healthy, of which the ETL is 1.5 s.
 
-Every container has a memory limit (Elasticsearch 1.25 GB, MySQL 512 MB, seed and API 256 MB each), so the
-stack stays under about 2.3 GB. MySQL and Elasticsearch are published on `127.0.0.1:3307` and `127.0.0.1:9201`
-so they never collide with instances you already run. On a Linux host without Docker Desktop, Elasticsearch may
-need `sudo sysctl -w vm.max_map_count=262144` once.
+Every container has a memory limit (Elasticsearch 1.25 GB, MySQL 512 MB, seed and API 256 MB each). MySQL and
+Elasticsearch are published on `127.0.0.1:3307` and `127.0.0.1:9201` so they never collide with instances you
+already run. On a Linux host without Docker Desktop, Elasticsearch may need
+`sudo sysctl -w vm.max_map_count=262144` once.
 
 | Command                        | What it does                                                            |
 | ------------------------------ | ----------------------------------------------------------------------- |
@@ -31,7 +35,6 @@ need `sudo sysctl -w vm.max_map_count=262144` once.
 | `docker compose logs seed`     | The ETL run: what was fetched, formatted, written and indexed           |
 | `docker compose logs -f api`   | One JSON line per request                                               |
 | `docker compose run --rm seed` | Re-runs the ETL (idempotent)                                            |
-| `docker compose down`          | Stops everything, keeps the data volumes                                |
 | `docker compose down -v`       | Stops everything and deletes the data (needed after schema edits)       |
 
 Ports and credentials can be overridden by copying `.env.example` to `.env`; every value has a default.
@@ -183,6 +186,36 @@ Errors always use one envelope:
 | 500    | `INTERNAL_ERROR`      | Anything else; details go to the log, never to the client                                       |
 
 ## Design
+
+### System architecture
+
+```mermaid
+flowchart LR
+  subgraph host["Your machine"]
+    U[curl / browser / Swagger UI] -->|:3000| API
+    DB[(MySQL client<br/>127.0.0.1:3307)]
+    ES[(curl<br/>127.0.0.1:9201)]
+  end
+  subgraph compose["docker compose (ecommerce-api)"]
+    M[(mysql:8.0<br/>512 MB)]
+    E[(elasticsearch:8.19<br/>1.25 GB)]
+    S[seed, runs once<br/>256 MB]
+    API[api, Express 5<br/>256 MB]
+    S -->|waits for healthy| M
+    S -->|waits for healthy| E
+    S -->|transaction| M
+    S -->|bulk + alias swap| E
+    API -->|starts after seed exits 0| S
+    API -->|list, filter, detail| M
+    API -->|query= search| E
+  end
+  X[dummyjson.com] -->|fetch, snapshot fallback| S
+  DB --- M
+  ES --- E
+```
+
+Startup order is enforced by health checks and `depends_on` conditions, so a request never reaches the API
+before the catalogue exists. The API is stateless; the only state is the two named volumes.
 
 ### Code layout
 
