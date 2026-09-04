@@ -7,37 +7,26 @@ from MySQL; free-text search is served from Elasticsearch.
 
 ## Quick start
 
-Requirements: Docker with Compose v2. Nothing else is installed on your machine.
+Requirements: Docker with Compose v2 and Node.js 22 for the tests. Nothing else is installed on your machine.
 
 ```sh
-git clone <this repository> ecommerce-api && cd ecommerce-api
-docker compose up --build -d --wait      # ~20 s once images are cached; first run also downloads ~3 GB
-curl -s http://localhost:3000/health     # {"status":"ok","checks":{"mysql":"up","elasticsearch":"up"}}
-open http://localhost:3000/docs          # Swagger UI (xdg-open on Linux)
-npm ci && npm test                       # 116 unit and HTTP tests, no database needed
-npm run smoke                            # 16 end-to-end checks plus latency samples against the running stack
-docker compose down                      # stop; add -v to also delete the data
+git clone https://github.com/barjinderpaul/ecom.git
+cd ecom
+docker compose up --build -d --wait    # ~30 s once images are cached; the first run also downloads ~3 GB
+docker compose logs seed               # the ETL run; ends with "Seed completed: 194 products, 24 categories, 138 tags ..."
+curl -s http://localhost:3000/health   # {"status":"ok","checks":{"mysql":"up","elasticsearch":"up"}}
+open http://localhost:3000/docs        # Swagger UI (xdg-open on Linux)
+npm ci && npm test                     # 116 unit and HTTP tests, no database needed
+npm run smoke                          # 16 end-to-end checks against the running stack
+docker compose down -v                 # stop and delete the data
 ```
 
-What `docker compose up` does, in order: starts MySQL and Elasticsearch and waits for their health checks;
-runs the `seed` container once (fetch, format, validate, write MySQL, build the search index, exit 0); starts
-the `api` container on <http://localhost:3000>. Measured on a laptop with images cached: 18 s to all four
-services healthy, of which the ETL is 1.5 s.
-
-Every container has a memory limit (Elasticsearch 1.25 GB, MySQL 512 MB, seed and API 256 MB each). MySQL and
-Elasticsearch are published on `127.0.0.1:3307` and `127.0.0.1:9201` so they never collide with instances you
-already run. On a Linux host without Docker Desktop, Elasticsearch may need
+`docker compose up` starts MySQL and Elasticsearch, waits for their health checks, runs the `seed` container
+once (the ETL: fetch from dummyjson, format, validate, write MySQL, build the search index) and starts the API
+only after the seed has exited 0. `docker compose logs seed` shows every stage of that run with counts;
+`docker compose run --rm seed` runs it again. Ports and credentials can be overridden through `.env`
+(see `.env.example`). On a Linux host without Docker Desktop, Elasticsearch may need
 `sudo sysctl -w vm.max_map_count=262144` once.
-
-| Command                        | What it does                                                            |
-| ------------------------------ | ----------------------------------------------------------------------- |
-| `docker compose ps`            | Status of the four services; `api` should be `healthy`, `seed` exited 0 |
-| `docker compose logs seed`     | The ETL run: what was fetched, formatted, written and indexed           |
-| `docker compose logs -f api`   | One JSON line per request                                               |
-| `docker compose run --rm seed` | Re-runs the ETL (idempotent)                                            |
-| `docker compose down -v`       | Stops everything and deletes the data (needed after schema edits)       |
-
-Ports and credentials can be overridden by copying `.env.example` to `.env`; every value has a default.
 
 ### Trying the API
 
@@ -86,32 +75,6 @@ curl -s 'http://127.0.0.1:9201/products/_search' -H 'content-type: application/j
 curl -s 'http://127.0.0.1:9201/products/_analyze' -H 'content-type: application/json' \
   -d '{ "analyzer": "product_search", "text": "Women'"'"'s cellphones" }'
 ```
-
-### Without Docker
-
-You need MySQL 8 and Elasticsearch 8 reachable from your machine (the compose services work: start them with
-`docker compose up mysql elasticsearch` and use the ports below), then:
-
-```sh
-npm ci
-MYSQL_PORT=3307 ELASTICSEARCH_URL=http://localhost:9201 npm run seed   # tables, data, index
-MYSQL_PORT=3307 ELASTICSEARCH_URL=http://localhost:9201 npm start      # or: npm run dev
-```
-
-Configuration is read from environment variables and validated at startup (`src/config.js`):
-
-| Variable                        | Default                 |
-| ------------------------------- | ----------------------- |
-| `PORT`                          | `3000`                  |
-| `MYSQL_HOST` / `MYSQL_PORT`     | `localhost` / `3306`    |
-| `MYSQL_USER` / `MYSQL_PASSWORD` | `app` / `app`           |
-| `MYSQL_DATABASE`                | `ecommerce`             |
-| `ELASTICSEARCH_URL`             | `http://localhost:9200` |
-| `ELASTICSEARCH_INDEX`           | `products`              |
-| `DATA_SOURCE_URL`               | `https://dummyjson.com` |
-| `SEED_FALLBACK_TO_SNAPSHOT`     | `true`                  |
-| `RATE_LIMIT_PER_MINUTE`         | `300` (0 disables)      |
-| `LOG_LEVEL`                     | `info`                  |
 
 ### Tests and linting
 
@@ -188,35 +151,14 @@ Errors always use one envelope:
 
 ## Design
 
-### System architecture
-
-```mermaid
-flowchart LR
-  subgraph host["Your machine"]
-    U[curl / browser / Swagger UI] -->|:3000| API
-    DB[(MySQL client<br/>127.0.0.1:3307)]
-    ES[(curl<br/>127.0.0.1:9201)]
-  end
-  subgraph compose["docker compose (ecommerce-api)"]
-    M[(mysql:8.0<br/>512 MB)]
-    E[(elasticsearch:8.19<br/>1.25 GB)]
-    S[seed, runs once<br/>256 MB]
-    API[api, Express 5<br/>256 MB]
-    S -->|waits for healthy| M
-    S -->|waits for healthy| E
-    S -->|transaction| M
-    S -->|bulk + alias swap| E
-    API -->|starts after seed exits 0| S
-    API -->|list, filter, detail| M
-    API -->|query= search| E
-  end
-  X[dummyjson.com] -->|fetch, snapshot fallback| S
-  DB --- M
-  ES --- E
-```
-
-Startup order is enforced by health checks and `depends_on` conditions, so a request never reaches the API
-before the catalogue exists. The API is stateless; the only state is the two named volumes.
+I built this the way I would build a catalogue for a real store, not as a demo that happens to answer the
+five endpoints. For the ETL that meant assuming the feed is imperfect: the same product or SKU can arrive
+twice, text comes with stray whitespace, control characters and inconsistent case, a category can be renamed
+or misspelled, a field can be missing, the upstream API can be down or change shape, and a run can die
+halfway. Each of those has a defined outcome (deduplicated, formatted, slugified, defaulted, snapshot
+fallback, transaction rolled back, previous index kept serving) and is counted in the run report. For the API
+it meant assuming real traffic: page-size caps, per-IP rate limiting, exact filters answered by the database
+and free text by the search engine, and no internal error ever reaching a client.
 
 ### Code layout
 
@@ -381,24 +323,8 @@ the choice visible. Nothing is ever served from a store it was not designed for:
 the assignment asks for it. What keeps it from being abused is the page size cap (100), the per-IP rate limit,
 and the 10,000-match window on search.
 
-### Latency
-
-Every request is one or a few indexed queries: a list page is a `COUNT` plus a page query on an index plus two
-`IN (...)` lookups for images and tags (no N+1); a search is one Elasticsearch request with cached filters and
-bounded fuzzy expansion; a detail is four indexed lookups (product, images, tags, reviews). Timeouts fail fast instead of piling up:
-10 s on the Elasticsearch client, 30 s per HTTP request. `npm run smoke` samples twenty requests each against
-the list, search and detail endpoints and prints p50 and p95 so regressions are visible; on this laptop the
-numbers were 3 ms p50 / 5 ms p95 for a list page, 8 ms / 15 ms for a search, and 2 ms / 3 ms for a product
-detail, measured through the Docker port mapping. Keeping p95 under 200 ms at real traffic is a matter of the cache and replicas
-described below, not of changing the query shapes.
-
 ### Other choices
 
-- Express 5 over Fastify or NestJS: five read-only endpoints do not benefit from Fastify's throughput or Nest's
-  structure, Express 5 propagates rejected promises to the error middleware natively, and it is the framework
-  most reviewers can read without a primer. Validation is done with zod at the HTTP boundary.
-- Plain JavaScript (ESM) rather than TypeScript keeps `docker compose up` free of a build step; zod provides
-  runtime validation where it matters (configuration, requests, upstream data).
 - The API never exposes internal errors. Infrastructure failures are `503` so a client can tell "retry later"
   from "you sent something wrong". Elasticsearch errors are never echoed to the client.
 - MySQL as the system of record, even though products in real catalogues carry attributes that differ by
